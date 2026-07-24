@@ -1,0 +1,275 @@
+openapi: 3.0.3
+info:
+  title: Kioskin API
+  description: |
+    Локальный HTTP API для управления оверлей-окном Kioskin на Windows.
+
+    Приложение отображает текст в полупрозрачном popup-окне на выбранном мониторе.
+    API позволяет обновлять содержимое, сбрасывать состояние, получать список мониторов
+    и корректно завершать работу.
+  version: 1.0.0
+  contact:
+    name: Kioskin
+
+servers:
+  - url: http://localhost:8282
+    description: Локальный сервер (порт зашит в приложении)
+
+tags:
+  - name: window
+    description: Управление содержимым и прозрачностью окна
+  - name: system
+    description: Системная информация и жизненный цикл приложения
+
+paths:
+  /health:
+    get:
+      tags: [system]
+      summary: Проверка доступности
+      description: Возвращает статус работоспособности HTTP-сервера.
+      operationId: getHealth
+      responses:
+        "200":
+          description: Сервис доступен
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthResponse"
+              example:
+                status: ok
+        "405":
+          $ref: "#/components/responses/MethodNotAllowed"
+
+  /monitors:
+    get:
+      tags: [system]
+      summary: Список мониторов
+      description: |
+        Возвращает прямоугольники всех подключённых мониторов.
+        Индексы соответствуют полю `monitor_index` в `config.json`.
+      operationId: listMonitors
+      responses:
+        "200":
+          description: Список мониторов
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/MonitorInfo"
+              example:
+                - index: 0
+                  left: 0
+                  top: 0
+                  right: 1920
+                  bottom: 1080
+                  width: 1920
+                  height: 1080
+                - index: 1
+                  left: 1920
+                  top: 0
+                  right: 3840
+                  bottom: 1080
+                  width: 1920
+                  height: 1080
+        "405":
+          $ref: "#/components/responses/MethodNotAllowed"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+  /update:
+    post:
+      tags: [window]
+      summary: Обновить содержимое окна
+      description: |
+        Принимает тело запроса и отображает его в окне.
+
+        - Если тело — валидный JSON, оно форматируется с отступом в 2 пробела.
+        - Иначе отображается как plain text.
+
+        Окно становится полностью непрозрачным (alpha = 255).
+      operationId: updateWindow
+      requestBody:
+        required: true
+        description: Произвольное содержимое для отображения (обычно JSON)
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+            example:
+              order_id: 42
+              status: ready
+          text/plain:
+            schema:
+              type: string
+            example: plain text message
+          application/octet-stream:
+            schema:
+              type: string
+              format: binary
+      responses:
+        "200":
+          description: Окно обновлено
+          content:
+            text/plain:
+              schema:
+                type: string
+              example: "JSON получен: окно обновлено и сделано непрозрачным"
+        "405":
+          $ref: "#/components/responses/MethodNotAllowed"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+  /clear:
+    post:
+      tags: [window]
+      summary: Очистить окно
+      description: |
+        Сбрасывает текст окна в `.` и переводит окно в полупрозрачный режим (alpha = 50).
+      operationId: clearWindow
+      responses:
+        "200":
+          description: Окно очищено
+          content:
+            text/plain:
+              schema:
+                type: string
+              example: "Окно очищено и переведено в полупрозрачный режим"
+        "405":
+          $ref: "#/components/responses/MethodNotAllowed"
+
+  /shutdown:
+    get:
+      tags: [system]
+      summary: Graceful shutdown
+      description: |
+        Останавливает HTTP-сервер (таймаут 5 секунд) и закрывает GUI-окно.
+        Повторный вызов во время shutdown возвращает успех с другим сообщением.
+      operationId: shutdown
+      responses:
+        "200":
+          description: Shutdown инициирован или уже выполняется
+          content:
+            text/plain:
+              schema:
+                type: string
+                enum:
+                  - "Graceful shutdown запущен"
+                  - "Graceful shutdown уже выполняется"
+              examples:
+                started:
+                  summary: Первый вызов
+                  value: "Graceful shutdown запущен"
+                inProgress:
+                  summary: Повторный вызов
+                  value: "Graceful shutdown уже выполняется"
+        "405":
+          $ref: "#/components/responses/MethodNotAllowed"
+
+  /docs:
+    get:
+      tags: [system]
+      summary: Swagger UI
+      description: |
+        Редирект на встроенный Swagger UI (`/swagger/index.html`).
+        Статические ресурсы UI отдаются из бинарника, спецификация — из `/openapi.yaml`.
+      operationId: swaggerUI
+      responses:
+        "302":
+          description: Редирект на Swagger UI
+          headers:
+            Location:
+              schema:
+                type: string
+                example: /swagger/index.html
+
+  /openapi.yaml:
+    get:
+      tags: [system]
+      summary: OpenAPI-спецификация
+      description: Возвращает встроенную OpenAPI 3.0 спецификацию этого API.
+      operationId: getOpenAPISpec
+      responses:
+        "200":
+          description: OpenAPI YAML
+          content:
+            application/yaml:
+              schema:
+                type: string
+        "405":
+          $ref: "#/components/responses/MethodNotAllowed"
+
+components:
+  schemas:
+    HealthResponse:
+      type: object
+      required: [status]
+      properties:
+        status:
+          type: string
+          enum: [ok]
+          example: ok
+
+    MonitorInfo:
+      type: object
+      required: [index, left, top, right, bottom, width, height]
+      properties:
+        index:
+          type: integer
+          description: Порядковый индекс монитора (с 0)
+          minimum: 0
+          example: 0
+        left:
+          type: integer
+          format: int32
+          description: Левая координата прямоугольника монитора (px)
+          example: 0
+        top:
+          type: integer
+          format: int32
+          description: Верхняя координата (px)
+          example: 0
+        right:
+          type: integer
+          format: int32
+          description: Правая координата (px)
+          example: 1920
+        bottom:
+          type: integer
+          format: int32
+          description: Нижняя координата (px)
+          example: 1080
+        width:
+          type: integer
+          format: int32
+          description: Ширина монитора в пикселях
+          example: 1920
+        height:
+          type: integer
+          format: int32
+          description: Высота монитора в пикселях
+          example: 1080
+
+  responses:
+    MethodNotAllowed:
+      description: HTTP-метод не поддерживается для данного эндпоинта
+      content:
+        text/plain:
+          schema:
+            type: string
+          example: "Метод не поддерживается"
+
+    InternalServerError:
+      description: Внутренняя ошибка сервера
+      content:
+        text/plain:
+          schema:
+            type: string
+          examples:
+            readBody:
+              summary: Ошибка чтения тела
+              value: "Ошибка чтения тела запроса"
+            monitors:
+              summary: Ошибка списка мониторов
+              value: "Не удалось получить список мониторов"

@@ -1,0 +1,19 @@
+﻿# Binaries
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.syso
+kioskin
+
+# IDE
+.idea/
+.vscode/
+*.iml
+
+# Local / OS
+config.json
+*.log
+Thumbs.db
+Desktop.ini
