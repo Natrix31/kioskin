@@ -33,6 +33,9 @@ var (
 	user32ProcSetLayeredWindowAttributes = syscall.NewLazyDLL("user32.dll").NewProc("SetLayeredWindowAttributes")
 )
 
+// Special HWND value for SetWindowPos Z-order, not exported by windigo.
+var hwndTopmost = win.HWND(^uintptr(0)) // HWND_TOPMOST (-1)
+
 type windowState struct {
 	mu       sync.RWMutex
 	text     string
@@ -397,14 +400,21 @@ func monitorRectByIndex(index int) (win.RECT, bool) {
 }
 
 func applyWindowPlacement(wnd *ui.Main, placement windowPlacement) {
-	if err := wnd.Hwnd().SetWindowPos(
-		win.HWND(0),
+	hwnd := wnd.Hwnd()
+
+	// Position/size the window and make it permanently top-most: it stays above
+	// every other window on the target monitor, including other top-most ones.
+	if err := hwnd.SetWindowPos(
+		hwndTopmost,
 		win.POINT{X: placement.x, Y: placement.y},
 		win.SIZE{Cx: placement.width, Cy: placement.height},
-		co.SWP_NOZORDER,
+		co.SWP_SHOWWINDOW,
 	); err != nil {
 		log.Printf("Не удалось задать позицию окна: %v", err)
+		return
 	}
+
+	hwnd.SetForegroundWindow()
 }
 
 func listMonitorRects() ([]win.RECT, error) {
