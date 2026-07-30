@@ -28,17 +28,33 @@ func main() {
 		log.Fatal(err)
 	}
 
-	var images [][]byte
+	// Не увеличиваем изображение выше исходного размера — только уменьшаем.
+	b := src.Bounds()
+	srcMax := b.Dx()
+	if b.Dy() > srcMax {
+		srcMax = b.Dy()
+	}
+	var selected []int
 	for _, n := range sizes {
+		if n <= srcMax {
+			selected = append(selected, n)
+		}
+	}
+	if len(selected) == 0 {
+		selected = []int{sizes[0]}
+	}
+
+	var images [][]byte
+	for _, n := range selected {
 		img := renderSquare(src, n)
 		images = append(images, encodeBMPIcon(img))
 	}
 
-	out := buildICO(images)
+	out := buildICO(images, selected)
 	if err := os.WriteFile(outPath, out, 0644); err != nil {
 		log.Fatal(err)
 	}
-	log.Printf("wrote %s (%d entries)", outPath, len(images))
+	log.Printf("wrote %s (%d entries, sizes %v)", outPath, len(images), selected)
 }
 
 // renderSquare fits src into an n×n transparent canvas preserving aspect ratio.
@@ -155,7 +171,7 @@ func encodeBMPIcon(img *image.NRGBA) []byte {
 }
 
 // buildICO assembles ICONDIR + entries + image data.
-func buildICO(images [][]byte) []byte {
+func buildICO(images [][]byte, dims []int) []byte {
 	var buf bytes.Buffer
 
 	// ICONDIR
@@ -165,7 +181,7 @@ func buildICO(images [][]byte) []byte {
 
 	offset := 6 + 16*len(images)
 	for i, data := range images {
-		n := sizes[i]
+		n := dims[i]
 		wb := byte(n)
 		hb := byte(n)
 		if n >= 256 {
