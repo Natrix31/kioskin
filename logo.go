@@ -155,30 +155,57 @@ func applyLogoToStatic(logo *ui.Static, bmp win.HBITMAP) {
 	}
 }
 
-func applyLogoAtSize(logo *ui.Static, width, height int32) {
-	if logo == nil || appLogo == nil || width < 1 || height < 1 {
+// applyImageAtSize scales src to width×height and sets it as the control bitmap.
+func applyImageAtSize(ctrl *ui.Static, src *logoSource, width, height int32) {
+	if ctrl == nil || src == nil || width < 1 || height < 1 {
 		return
 	}
 
-	scaled := scaleImage(appLogo.img, int(width), int(height))
+	scaled := scaleImage(src.img, int(width), int(height))
 	hBmp, err := imageToBitmap(scaled)
 	if err != nil {
-		log.Printf("Не удалось создать bitmap логотипа: %v", err)
+		log.Printf("Не удалось создать bitmap изображения: %v", err)
 		return
 	}
 
-	applyLogoToStatic(logo, hBmp)
+	applyLogoToStatic(ctrl, hBmp)
 }
 
-func setLogoVisible(logo *ui.Static, visible bool) {
-	if logo == nil {
+func applyLogoAtSize(logo *ui.Static, width, height int32) {
+	applyImageAtSize(logo, appLogo, width, height)
+}
+
+func setControlVisible(ctrl *ui.Static, visible bool) {
+	if ctrl == nil {
 		return
 	}
 	cmd := co.SW_HIDE
 	if visible {
 		cmd = co.SW_SHOW
 	}
-	logo.Hwnd().ShowWindow(cmd)
+	ctrl.Hwnd().ShowWindow(cmd)
+}
+
+// calcContainSize fits a src×src image inside box×box preserving aspect ratio.
+func calcContainSize(srcW, srcH, boxW, boxH int32) (int32, int32) {
+	if srcW < 1 || srcH < 1 || boxW < 1 || boxH < 1 {
+		return boxW, boxH
+	}
+	// Compare aspect ratios without floats: srcW/srcH vs boxW/boxH.
+	if srcW*boxH < boxW*srcH {
+		// Height-bound: scale to full box height.
+		w := srcW * boxH / srcH
+		if w < 1 {
+			w = 1
+		}
+		return w, boxH
+	}
+	// Width-bound: scale to full box width.
+	h := srcH * boxW / srcW
+	if h < 1 {
+		h = 1
+	}
+	return boxW, h
 }
 
 func calcLogoSize(clientWidth, clientHeight, margin int32) (int32, int32) {
@@ -207,7 +234,7 @@ func calcLogoSize(clientWidth, clientHeight, margin int32) (int32, int32) {
 	return logoWidth, logoHeight
 }
 
-func resizeWindowContent(wnd *ui.Main, label, logo *ui.Static, showLogo bool) {
+func resizeWindowContent(wnd *ui.Main, label, logo, socials *ui.Static, showLogo, showSocials bool) {
 	clientRect, err := wnd.Hwnd().GetClientRect()
 	if err != nil {
 		log.Printf("Не удалось получить размер клиентской области: %v", err)
@@ -218,8 +245,27 @@ func resizeWindowContent(wnd *ui.Main, label, logo *ui.Static, showLogo bool) {
 	clientWidth := clientRect.Right - clientRect.Left
 	clientHeight := clientRect.Bottom - clientRect.Top
 
+	if showSocials {
+		setControlVisible(logo, false)
+		setControlVisible(label, false)
+		if socials == nil || appSocials == nil {
+			setControlVisible(socials, false)
+			return
+		}
+		imgW, imgH := calcContainSize(appSocials.width, appSocials.height, clientWidth, clientHeight)
+		imgX := (clientWidth - imgW) / 2
+		imgY := (clientHeight - imgH) / 2
+		applyImageAtSize(socials, appSocials, imgW, imgH)
+		resizeControl(wnd, socials, imgX, imgY, imgW, imgH)
+		setControlVisible(socials, true)
+		return
+	}
+
+	setControlVisible(socials, false)
+	setControlVisible(label, true)
+
 	if !showLogo || logo == nil || appLogo == nil {
-		setLogoVisible(logo, false)
+		setControlVisible(logo, false)
 		resizeControl(wnd, label, margin, margin, clientWidth-margin*2, clientHeight-margin*2)
 		return
 	}
@@ -230,7 +276,7 @@ func resizeWindowContent(wnd *ui.Main, label, logo *ui.Static, showLogo bool) {
 
 	applyLogoAtSize(logo, logoWidth, logoHeight)
 	resizeControl(wnd, logo, logoX, logoY, logoWidth, logoHeight)
-	setLogoVisible(logo, true)
+	setControlVisible(logo, true)
 
 	textY := logoY + logoHeight + margin
 	textHeight := clientHeight - textY - margin

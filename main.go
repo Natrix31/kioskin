@@ -37,13 +37,17 @@ var (
 var hwndTopmost = win.HWND(^uintptr(0)) // HWND_TOPMOST (-1)
 
 type windowState struct {
-	mu       sync.RWMutex
-	text     string
-	alpha    byte
-	showLogo bool
-	wnd      *ui.Main
-	label    *ui.Static
-	logo     *ui.Static
+	mu          sync.RWMutex
+	text        string
+	alpha       byte
+	showLogo    bool
+	showSocials bool
+	wnd         *ui.Main
+	label       *ui.Static
+	logo        *ui.Static
+	socials     *ui.Static
+	normal      windowPlacement
+	full        windowPlacement
 }
 
 type appConfig struct {
@@ -88,6 +92,9 @@ func main() {
 	if err := initAppLogo(cfg); err != nil {
 		log.Printf("Не удалось загрузить логотип: %v", err)
 	}
+	if err := initAppSocials(); err != nil {
+		log.Printf("Не удалось загрузить socials-картинку: %v", err)
+	}
 	state := newWindowState()
 	mux := http.NewServeMux()
 	server := &http.Server{
@@ -100,6 +107,7 @@ func main() {
 	}
 	mux.HandleFunc("/update", handleShowRequest(state))
 	mux.HandleFunc("/clear", handleClearRequest(state))
+	mux.HandleFunc("/socials", handleSocialsRequest(state))
 	mux.HandleFunc("/health", handleHealthcheck())
 	mux.HandleFunc("/monitors", handleMonitors())
 	mux.HandleFunc("/shutdown", handleShutdown(runtimeState))
@@ -120,8 +128,14 @@ func main() {
 
 // Displays the main window, blocking until it is closed.
 func ShowMainWindow(state *windowState, cfg appConfig) int {
-	initialText, initialAlpha, initialShowLogo := state.snapshot()
-	placement := initialWindowPlacement(cfg)
+	initialText, initialAlpha, initialShowLogo, initialShowSocials := state.snapshot()
+	normal := initialWindowPlacement(cfg)
+	full := fullscreenWindowPlacement(cfg)
+
+	placement := normal
+	if initialShowSocials {
+		placement = full
+	}
 
 	wnd := ui.NewMain(
 		ui.OptsMain().
@@ -139,6 +153,15 @@ func ShowMainWindow(state *windowState, cfg appConfig) int {
 			Position(ui.Dpi(10, 12)),
 	)
 
+	socialsStatic := ui.NewStatic(
+		wnd,
+		ui.OptsStatic().
+			CtrlStyle(co.SS_BITMAP).
+			WndStyle(co.WS_CHILD).
+			Size(ui.Dpi(200, 80)).
+			Position(ui.Dpi(0, 0)),
+	)
+
 	lbl := ui.NewStatic(
 		wnd,
 		ui.OptsStatic().
@@ -148,23 +171,37 @@ func ShowMainWindow(state *windowState, cfg appConfig) int {
 	)
 
 	wnd.On().WmCreate(func(_ ui.WmCreate) int {
-		state.bindWindow(wnd, lbl, logoStatic)
+		state.bindWindow(wnd, lbl, logoStatic, socialsStatic, normal, full)
 		applyWindowPlacement(wnd, placement)
-		resizeWindowContent(wnd, lbl, logoStatic, initialShowLogo)
+		resizeWindowContent(wnd, lbl, logoStatic, socialsStatic, initialShowLogo, initialShowSocials)
 		if err := applyWindowOpacity(wnd, initialAlpha); err != nil {
 			log.Printf("Не удалось применить прозрачность окна: %v", err)
 		}
 		return 0
 	})
 	wnd.On().WmSize(func(_ ui.WmSize) {
-		showLogo := state.isLogoVisible()
-		resizeWindowContent(wnd, lbl, logoStatic, showLogo)
+		showLogo, showSocials := state.contentFlags()
+		resizeWindowContent(wnd, lbl, logoStatic, socialsStatic, showLogo, showSocials)
 	})
 	wnd.On().WmDestroy(func() {
 		state.unbindWindow(wnd)
 	})
 
 	return wnd.RunAsMain()
+}
+
+func handleSocialsRequest(state *windowState) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			http.Error(w, "Метод не поддерживается", http.StatusMethodNotAllowed)
+			return
+		}
+
+		state.enterSocialsMode()
+
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprintln(w, "Окно развёрнуто на весь экран, показана картинка socials")
+	}
 }
 
 func handleShowRequest(state *windowState) http.HandlerFunc {
@@ -260,24 +297,27 @@ func handleShutdown(app *appRuntime) http.HandlerFunc {
 	}
 }
 
-func (s *windowState) snapshot() (string, byte, bool) {
+func (s *windowState) snapshot() (string, byte, bool, bool) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	return s.text, s.alpha, s.showLogo
+	return s.text, s.alpha, s.showLogo, s.showSocials
 }
 
-func (s *windowState) isLogoVisible() bool {
+func (s *windowState) contentFlags() (bool, bool) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	return s.showLogo
+	return s.showLogo, s.showSocials
 }
 
-func (s *windowState) bindWindow(wnd *ui.Main, label, logo *ui.Static) {
+func (s *windowState) bindWindow(wnd *ui.Main, label, logo, socials *ui.Static, normal, full windowPlacement) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.wnd = wnd
 	s.label = label
 	s.logo = logo
+	s.socials = socials
+	s.normal = normal
+	s.full = full
 }
 
 func (s *windowState) unbindWindow(wnd *ui.Main) {
@@ -287,6 +327,7 @@ func (s *windowState) unbindWindow(wnd *ui.Main) {
 		s.wnd = nil
 		s.label = nil
 		s.logo = nil
+		s.socials = nil
 	}
 }
 
@@ -295,9 +336,12 @@ func (s *windowState) update(text string, alpha byte, showLogo bool) {
 	s.text = text
 	s.alpha = alpha
 	s.showLogo = showLogo
+	s.showSocials = false
 	wnd := s.wnd
 	label := s.label
 	logo := s.logo
+	socials := s.socials
+	normal := s.normal
 	s.mu.Unlock()
 
 	if wnd == nil || label == nil {
@@ -305,11 +349,39 @@ func (s *windowState) update(text string, alpha byte, showLogo bool) {
 	}
 
 	wnd.UiThread(func() {
+		applyWindowPlacement(wnd, normal)
 		if err := label.Hwnd().SetWindowText(text); err != nil {
 			log.Printf("Не удалось обновить текст окна: %v", err)
 		}
-		resizeWindowContent(wnd, label, logo, showLogo)
+		resizeWindowContent(wnd, label, logo, socials, showLogo, false)
 		if err := applyWindowOpacity(wnd, alpha); err != nil {
+			log.Printf("Не удалось сделать окно непрозрачным: %v", err)
+		}
+	})
+}
+
+// enterSocialsMode switches the window to full-screen mode: it fills the target
+// monitor, becomes fully opaque and displays the socials image.
+func (s *windowState) enterSocialsMode() {
+	s.mu.Lock()
+	s.showSocials = true
+	s.showLogo = false
+	s.alpha = alphaOpaque
+	wnd := s.wnd
+	label := s.label
+	logo := s.logo
+	socials := s.socials
+	full := s.full
+	s.mu.Unlock()
+
+	if wnd == nil {
+		return
+	}
+
+	wnd.UiThread(func() {
+		applyWindowPlacement(wnd, full)
+		resizeWindowContent(wnd, label, logo, socials, false, true)
+		if err := applyWindowOpacity(wnd, alphaOpaque); err != nil {
 			log.Printf("Не удалось сделать окно непрозрачным: %v", err)
 		}
 	})
@@ -384,6 +456,33 @@ func initialWindowPlacement(cfg appConfig) windowPlacement {
 		y:      0,
 		width:  screenWidth,
 		height: screenHeight / 2,
+	}
+}
+
+func fullscreenWindowPlacement(cfg appConfig) windowPlacement {
+	if rect, ok := monitorRectByIndex(cfg.MonitorIndex); ok {
+		return windowPlacement{
+			x:      rect.Left,
+			y:      rect.Top,
+			width:  rect.Right - rect.Left,
+			height: rect.Bottom - rect.Top,
+		}
+	}
+
+	screenWidth := win.GetSystemMetrics(co.SM_CXSCREEN)
+	screenHeight := win.GetSystemMetrics(co.SM_CYSCREEN)
+	if screenWidth <= 0 {
+		screenWidth = 600
+	}
+	if screenHeight <= 0 {
+		screenHeight = 600
+	}
+
+	return windowPlacement{
+		x:      0,
+		y:      0,
+		width:  screenWidth,
+		height: screenHeight,
 	}
 }
 

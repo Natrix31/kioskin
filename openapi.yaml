@@ -139,6 +139,29 @@ paths:
         "405":
           $ref: "#/components/responses/MethodNotAllowed"
 
+  /socials:
+    get:
+      tags: [window]
+      summary: Показать socials-картинку на весь экран
+      description: |
+        Разворачивает окно на весь выбранный монитор, делает его полностью
+        непрозрачным (alpha = 255) и отображает изображение `assets/socials.png`,
+        вписанное по центру с сохранением пропорций. Текст и логотип скрываются.
+
+        Возврат к обычному режиму — через `POST /update` или `POST /clear`,
+        которые восстанавливают исходный (половинный) размер окна.
+      operationId: showSocials
+      responses:
+        "200":
+          description: Окно развёрнуто на весь экран, показана картинка
+          content:
+            text/plain:
+              schema:
+                type: string
+              example: "Окно развёрнуто на весь экран, показана картинка socials"
+        "405":
+          $ref: "#/components/responses/MethodNotAllowed"
+
   /shutdown:
     get:
       tags: [system]
