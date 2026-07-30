@@ -5,6 +5,7 @@
 *.so
 *.dylib
 *.syso
+!rsrc.syso
 kioskin
 
 # IDE

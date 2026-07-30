@@ -88,6 +88,8 @@ func newWindowState() *windowState {
 func main() {
 	runtime.LockOSThread() // Windows GUI must run on one OS thread.
 
+	log.SetOutput(io.Discard) // GUI-приложение: ничего не выводим в консоль.
+
 	cfg := loadConfig(configFilePath)
 	if err := initAppLogo(cfg); err != nil {
 		log.Printf("Не удалось загрузить логотип: %v", err)
