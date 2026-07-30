@@ -232,7 +232,7 @@ func handleShowRequest(state *windowState) http.HandlerFunc {
 
 func handleClearRequest(state *windowState) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodPost {
+		if r.Method != http.MethodGet {
 			http.Error(w, "Метод не поддерживается", http.StatusMethodNotAllowed)
 			return
 		}

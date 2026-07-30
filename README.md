@@ -57,7 +57,7 @@ http://localhost:8282
 | Метод | Путь | Описание |
 |-------|------|----------|
 | `POST` | `/update` | Показать JSON в окне, сделать окно непрозрачным |
-| `POST` | `/clear` | Очистить окно, вернуть полупрозрачный режим |
+| `GET` | `/clear` | Очистить окно, вернуть полупрозрачный режим |
 | `GET` | `/socials` | Развернуть окно на весь экран и показать `assets/socials.png` |
 | `GET` | `/health` | Проверка доступности сервиса |
 | `GET` | `/monitors` | Список подключённых мониторов |
@@ -77,7 +77,7 @@ curl -X POST http://localhost:8282/update \
   -d '{"order_id": 42, "status": "ready"}'
 
 # Очистить окно
-curl -X POST http://localhost:8282/clear
+curl http://localhost:8282/clear
 
 # Показать socials-картинку на весь экран
 curl http://localhost:8282/socials

@@ -122,7 +122,7 @@ paths:
           $ref: "#/components/responses/InternalServerError"
 
   /clear:
-    post:
+    get:
       tags: [window]
       summary: Очистить окно
       description: |
@@ -148,7 +148,7 @@ paths:
         непрозрачным (alpha = 255) и отображает изображение `assets/socials.png`,
         вписанное по центру с сохранением пропорций. Текст и логотип скрываются.
 
-        Возврат к обычному режиму — через `POST /update` или `POST /clear`,
+        Возврат к обычному режиму — через `POST /update` или `GET /clear`,
         которые восстанавливают исходный (половинный) размер окна.
       operationId: showSocials
       responses:
