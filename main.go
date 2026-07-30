@@ -27,6 +27,10 @@ const (
 	alphaOpaque       = 255
 	labelMarginDip    = 12
 	configFilePath    = "config.json"
+
+	// appIconResID — числовой ID иконки (RT_GROUP_ICON) в rsrc.syso.
+	// rsrc без манифеста присваивает первой группе иконок ID = 1.
+	appIconResID = 1
 )
 
 var (
@@ -143,7 +147,9 @@ func ShowMainWindow(state *windowState, cfg appConfig) int {
 		ui.OptsMain().
 			Title("Kioskin").
 			Size(int(placement.width), int(placement.height)).
-			Style(co.WS_POPUP | co.WS_VISIBLE),
+			Style(co.WS_POPUP | co.WS_VISIBLE).
+			ExStyle(co.WS_EX_APPWINDOW). // показывать кнопку окна на панели задач
+			ClassIconId(appIconResID),   // иконка окна/панели задач из rsrc.syso
 	)
 
 	logoStatic := ui.NewStatic(
