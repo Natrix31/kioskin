@@ -27,8 +27,8 @@ type purchaseItem struct {
 	Sum      float64
 }
 
-// purchaseInput — тело запроса /update. Указатели нужны, чтобы отличить
-// отсутствующее поле от нулевого значения.
+// purchaseInput — одна позиция в теле запроса /update. Указатели нужны, чтобы
+// отличить отсутствующее поле от нулевого значения.
 type purchaseInput struct {
 	Name     *string  `json:"name"`
 	Quantity *float64 `json:"quantity"`
@@ -36,14 +36,36 @@ type purchaseInput struct {
 	Sum      *float64 `json:"sum"`
 }
 
-// parsePurchaseItem разбирает JSON тела /update и проверяет обязательные поля.
-func parsePurchaseItem(body []byte) (purchaseItem, error) {
-	var in purchaseInput
+// purchaseRequest — тело запроса /update: весь список товаров целиком.
+type purchaseRequest struct {
+	Goods []purchaseInput `json:"goods"`
+}
+
+// parsePurchaseList разбирает JSON тела /update ({"goods": [...]}) и проверяет
+// обязательные поля каждой позиции. Возвращает список товаров.
+func parsePurchaseList(body []byte) ([]purchaseItem, error) {
+	var req purchaseRequest
 	dec := json.NewDecoder(bytes.NewReader(body))
-	if err := dec.Decode(&in); err != nil {
-		return purchaseItem{}, fmt.Errorf("некорректный JSON: %v", err)
+	if err := dec.Decode(&req); err != nil {
+		return nil, fmt.Errorf("некорректный JSON: %v", err)
+	}
+	if req.Goods == nil {
+		return nil, fmt.Errorf("отсутствует обязательное поле goods (список товаров)")
 	}
 
+	items := make([]purchaseItem, 0, len(req.Goods))
+	for i, in := range req.Goods {
+		item, err := validatePurchaseItem(in)
+		if err != nil {
+			return nil, fmt.Errorf("товар #%d: %v", i+1, err)
+		}
+		items = append(items, item)
+	}
+	return items, nil
+}
+
+// validatePurchaseItem проверяет обязательные поля одной позиции.
+func validatePurchaseItem(in purchaseInput) (purchaseItem, error) {
 	var missing []string
 	if in.Name == nil || strings.TrimSpace(*in.Name) == "" {
 		missing = append(missing, "name")

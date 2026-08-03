@@ -39,23 +39,42 @@ func TestFormatQty(t *testing.T) {
 	}
 }
 
-func TestParsePurchaseItemMissingFields(t *testing.T) {
-	_, err := parsePurchaseItem([]byte(`{"name":"Хлеб","price":45.0}`))
+func TestParsePurchaseListMissingField(t *testing.T) {
+	_, err := parsePurchaseList([]byte(`{"goods":[{"name":"Хлеб","price":45.0}]}`))
 	if err == nil {
 		t.Fatal("ожидалась ошибка о недостающих полях, получено nil")
+	}
+	if !strings.Contains(err.Error(), "товар #1") {
+		t.Errorf("ошибка должна указывать номер товара: %v", err)
 	}
 	if !strings.Contains(err.Error(), "quantity") || !strings.Contains(err.Error(), "sum") {
 		t.Errorf("ошибка должна называть quantity и sum: %v", err)
 	}
 }
 
-func TestParsePurchaseItemOK(t *testing.T) {
-	it, err := parsePurchaseItem([]byte(`{"name":" Молоко 3.2% ","quantity":2,"price":89.9,"sum":179.8}`))
+func TestParsePurchaseListNoGoods(t *testing.T) {
+	if _, err := parsePurchaseList([]byte(`{}`)); err == nil {
+		t.Fatal("ожидалась ошибка об отсутствии goods")
+	}
+}
+
+func TestParsePurchaseListOK(t *testing.T) {
+	body := `{"goods":[
+		{"name":" Молоко 3.2% ","quantity":2,"price":89.9,"sum":179.8},
+		{"name":"Вода минеральная 1.5 л","quantity":1,"price":52.9,"sum":52.9}
+	]}`
+	items, err := parsePurchaseList([]byte(body))
 	if err != nil {
 		t.Fatalf("неожиданная ошибка: %v", err)
 	}
-	if it.Name != "Молоко 3.2%" || it.Quantity != 2 || it.Price != 89.9 || it.Sum != 179.8 {
-		t.Errorf("распарсено неверно: %+v", it)
+	if len(items) != 2 {
+		t.Fatalf("ожидалось 2 позиции, получено %d", len(items))
+	}
+	if items[0].Name != "Молоко 3.2%" || items[0].Quantity != 2 || items[0].Sum != 179.8 {
+		t.Errorf("позиция 0 распарсена неверно: %+v", items[0])
+	}
+	if items[1].Name != "Вода минеральная 1.5 л" || items[1].Sum != 52.9 {
+		t.Errorf("позиция 1 распарсена неверно: %+v", items[1])
 	}
 }
 

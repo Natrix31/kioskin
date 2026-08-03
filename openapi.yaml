@@ -80,48 +80,58 @@ paths:
   /update:
     post:
       tags: [window]
-      summary: Добавить позицию в список покупок
+      summary: Показать список покупок
       description: |
-        Добавляет одну позицию чека в список покупок и отображает его в окне
-        в виде выровненной таблицы (Наименование, Кол-во, Цена, Сумма) с
+        Принимает **весь список товаров** одним запросом и отображает его в
+        окне в виде выровненной таблицы (Наименование, Кол-во, Цена, Сумма) с
         итоговой строкой ИТОГО.
 
-        - Каждый запрос добавляет **одну** позицию; список накапливается.
-        - Тело — JSON строго с полями `name`, `quantity`, `price`, `sum`.
+        - Тело — JSON `{"goods": [ ... ]}`; каждый элемент строго с полями
+          `name`, `quantity`, `price`, `sum`.
+        - Список **заменяется** целиком присланным (не накапливается).
+        - Пустой `goods` (`[]`) допустим — показывает пустую таблицу.
         - Окно становится полностью непрозрачным (alpha = 255).
 
-        Очистить список (новый чек) — `GET /clear`.
+        Очистить окно — `GET /clear`.
       operationId: updateWindow
       requestBody:
         required: true
-        description: Одна позиция чека
+        description: Список товаров чека
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/PurchaseItem"
+              $ref: "#/components/schemas/PurchaseList"
             example:
-              name: "Молоко 3.2% 950мл"
-              quantity: 2
-              price: 89.90
-              sum: 179.80
+              goods:
+                - name: "Молоко 3.2% 950мл"
+                  quantity: 2
+                  price: 89.90
+                  sum: 179.80
+                - name: "Вода минеральная с газом 1.5 л"
+                  quantity: 1
+                  price: 52.90
+                  sum: 52.90
       responses:
         "200":
-          description: Позиция добавлена
+          description: Список показан
           content:
             text/plain:
               schema:
                 type: string
-              example: "Позиция добавлена в список (всего: 1)"
+              example: "Список обновлён (позиций: 2)"
         "400":
-          description: Некорректный JSON или отсутствуют обязательные поля
+          description: Некорректный JSON, нет поля goods или в позиции нет обязательных полей
           content:
             text/plain:
               schema:
                 type: string
               examples:
+                noGoods:
+                  summary: Нет поля goods
+                  value: "отсутствует обязательное поле goods (список товаров)"
                 missing:
-                  summary: Нет обязательных полей
-                  value: "отсутствуют или пусты обязательные поля: quantity, sum"
+                  summary: В позиции нет полей
+                  value: "товар #1: отсутствуют или пусты обязательные поля: quantity, sum"
                 badJSON:
                   summary: Битый JSON
                   value: "некорректный JSON: unexpected end of JSON input"
@@ -234,6 +244,16 @@ paths:
 
 components:
   schemas:
+    PurchaseList:
+      type: object
+      required: [goods]
+      properties:
+        goods:
+          type: array
+          description: Список позиций чека (может быть пустым)
+          items:
+            $ref: "#/components/schemas/PurchaseItem"
+
     PurchaseItem:
       type: object
       required: [name, quantity, price, sum]

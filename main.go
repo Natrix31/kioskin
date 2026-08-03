@@ -259,16 +259,16 @@ func handleShowRequest(state *windowState) http.HandlerFunc {
 		}
 		defer r.Body.Close()
 
-		item, err := parsePurchaseItem(body)
+		items, err := parsePurchaseList(body)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
 
-		count := state.addPurchaseItem(item)
+		count := state.setPurchaseItems(items)
 
 		w.WriteHeader(http.StatusOK)
-		fmt.Fprintf(w, "Позиция добавлена в список (всего: %d)\n", count)
+		fmt.Fprintf(w, "Список обновлён (позиций: %d)\n", count)
 	}
 }
 
@@ -373,11 +373,11 @@ func (s *windowState) unbindWindow(wnd *ui.Main) {
 	}
 }
 
-// addPurchaseItem добавляет позицию в список покупок и перерисовывает окно.
+// setPurchaseItems заменяет список покупок целиком и перерисовывает окно.
 // Возвращает количество позиций в списке.
-func (s *windowState) addPurchaseItem(item purchaseItem) int {
+func (s *windowState) setPurchaseItems(items []purchaseItem) int {
 	s.mu.Lock()
-	s.items = append(s.items, item)
+	s.items = items
 	s.showLogo = true
 	s.showSocials = false
 	s.alpha = alphaOpaque
