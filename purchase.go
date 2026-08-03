@@ -8,17 +8,6 @@ import (
 	"strings"
 )
 
-// Ширины колонок списка покупок (в символах моноширинного шрифта).
-const (
-	colName  = 22 // наименование (слева, длинное обрезается)
-	colQty   = 7  // количество (справа)
-	colPrice = 10 // цена (справа)
-	colSum   = 11 // сумма (справа)
-
-	// Полная ширина строки = сумма колонок + разделяющие пробелы.
-	lineWidth = colName + 1 + colQty + 1 + colPrice + 1 + colSum
-)
-
 // purchaseItem — одна позиция чека.
 type purchaseItem struct {
 	Name     string
@@ -90,67 +79,6 @@ func validatePurchaseItem(in purchaseInput) (purchaseItem, error) {
 		Price:    *in.Price,
 		Sum:      *in.Sum,
 	}, nil
-}
-
-// renderPurchaseList строит выровненную по колонкам таблицу списка покупок
-// с шапкой и итоговой строкой.
-func renderPurchaseList(items []purchaseItem) string {
-	var b strings.Builder
-
-	b.WriteString(padRight("НАИМЕНОВАНИЕ", colName))
-	b.WriteByte(' ')
-	b.WriteString(padLeft("КОЛ-ВО", colQty))
-	b.WriteByte(' ')
-	b.WriteString(padLeft("ЦЕНА", colPrice))
-	b.WriteByte(' ')
-	b.WriteString(padLeft("СУММА", colSum))
-	b.WriteByte('\n')
-	b.WriteString(strings.Repeat("─", lineWidth))
-	b.WriteByte('\n')
-
-	var total float64
-	for _, it := range items {
-		b.WriteString(padRight(it.Name, colName))
-		b.WriteByte(' ')
-		b.WriteString(padLeft(formatQty(it.Quantity), colQty))
-		b.WriteByte(' ')
-		b.WriteString(padLeft(formatMoney(it.Price), colPrice))
-		b.WriteByte(' ')
-		b.WriteString(padLeft(formatMoney(it.Sum), colSum))
-		b.WriteByte('\n')
-		total += it.Sum
-	}
-
-	b.WriteString(strings.Repeat("─", lineWidth))
-	b.WriteByte('\n')
-	// "ИТОГО" занимает все колонки слева от суммы.
-	b.WriteString(padRight("ИТОГО", colName+1+colQty+1+colPrice))
-	b.WriteByte(' ')
-	b.WriteString(padLeft(formatMoney(total), colSum))
-
-	return b.String()
-}
-
-// padRight дополняет строку пробелами справа до ширины w (по рунам).
-// Слишком длинная строка обрезается с добавлением «…».
-func padRight(s string, w int) string {
-	r := []rune(s)
-	if len(r) > w {
-		if w <= 1 {
-			return string(r[:w])
-		}
-		return string(r[:w-1]) + "…"
-	}
-	return s + strings.Repeat(" ", w-len(r))
-}
-
-// padLeft дополняет строку пробелами слева до ширины w (по рунам).
-func padLeft(s string, w int) string {
-	r := []rune(s)
-	if len(r) >= w {
-		return s
-	}
-	return strings.Repeat(" ", w-len(r)) + s
 }
 
 // formatMoney форматирует сумму: два знака после запятой, разделитель разрядов

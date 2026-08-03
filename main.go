@@ -164,7 +164,7 @@ func main() {
 
 // Displays the main window, blocking until it is closed.
 func ShowMainWindow(state *windowState, cfg appConfig) int {
-	initialText, initialAlpha, initialShowLogo, initialShowSocials := state.snapshot()
+	_, initialAlpha, initialShowLogo, initialShowSocials := state.snapshot()
 	normal := initialWindowPlacement(cfg)
 	full := fullscreenWindowPlacement(cfg)
 
@@ -200,25 +200,31 @@ func ShowMainWindow(state *windowState, cfg appConfig) int {
 			Position(ui.Dpi(0, 0)),
 	)
 
+	// Список покупок рисуется вручную (owner-draw) — так возможны чередующийся
+	// фон строк и перенос длинных наименований.
 	lbl := ui.NewStatic(
 		wnd,
 		ui.OptsStatic().
-			Text(initialText).
+			CtrlStyle(co.SS_OWNERDRAW).
 			Size(ui.Dpi(580, 760)).
 			Position(ui.Dpi(10, 22)),
 	)
 
 	wnd.On().WmCreate(func(_ ui.WmCreate) int {
 		state.bindWindow(wnd, lbl, logoStatic, socialsStatic, normal, full)
-		if f := ensureListFont(); f != 0 {
-			lbl.Hwnd().SendMessage(co.WM_SETFONT, win.WPARAM(f), win.LPARAM(1))
-		}
 		applyWindowPlacement(wnd, placement)
 		resizeWindowContent(wnd, lbl, logoStatic, socialsStatic, initialShowLogo, initialShowSocials)
 		if err := applyWindowOpacity(wnd, initialAlpha); err != nil {
 			log.Printf("Не удалось применить прозрачность окна: %v", err)
 		}
 		return 0
+	})
+	wnd.On().WmDrawItem(func(p ui.WmDrawItem) {
+		dis := p.DrawItemStruct()
+		if dis.HwndItem != lbl.Hwnd() {
+			return
+		}
+		drawPurchaseList(dis.Hdc, dis.RcItem, state.snapshotItems())
 	})
 	wnd.On().WmSize(func(_ ui.WmSize) {
 		showLogo, showSocials := state.contentFlags()
@@ -351,6 +357,12 @@ func (s *windowState) contentFlags() (bool, bool) {
 	return s.showLogo, s.showSocials
 }
 
+func (s *windowState) snapshotItems() []purchaseItem {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.items
+}
+
 func (s *windowState) bindWindow(wnd *ui.Main, label, logo, socials *ui.Static, normal, full windowPlacement) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -381,8 +393,6 @@ func (s *windowState) setPurchaseItems(items []purchaseItem) int {
 	s.showLogo = true
 	s.showSocials = false
 	s.alpha = alphaOpaque
-	text := renderPurchaseList(s.items)
-	s.text = text
 	count := len(s.items)
 	wnd := s.wnd
 	label := s.label
@@ -397,10 +407,10 @@ func (s *windowState) setPurchaseItems(items []purchaseItem) int {
 
 	wnd.UiThread(func() {
 		applyWindowPlacement(wnd, normal)
-		if err := label.Hwnd().SetWindowText(text); err != nil {
-			log.Printf("Не удалось обновить текст окна: %v", err)
-		}
 		resizeWindowContent(wnd, label, logo, socials, true, false)
+		if err := label.Hwnd().InvalidateRect(nil, false); err != nil {
+			log.Printf("Не удалось перерисовать список: %v", err)
+		}
 		if err := applyWindowOpacity(wnd, alphaOpaque); err != nil {
 			log.Printf("Не удалось сделать окно непрозрачным: %v", err)
 		}
@@ -428,10 +438,10 @@ func (s *windowState) update(text string, alpha byte, showLogo bool) {
 
 	wnd.UiThread(func() {
 		applyWindowPlacement(wnd, normal)
-		if err := label.Hwnd().SetWindowText(text); err != nil {
-			log.Printf("Не удалось обновить текст окна: %v", err)
-		}
 		resizeWindowContent(wnd, label, logo, socials, showLogo, false)
+		if err := label.Hwnd().InvalidateRect(nil, false); err != nil {
+			log.Printf("Не удалось перерисовать окно: %v", err)
+		}
 		if err := applyWindowOpacity(wnd, alpha); err != nil {
 			log.Printf("Не удалось сделать окно непрозрачным: %v", err)
 		}

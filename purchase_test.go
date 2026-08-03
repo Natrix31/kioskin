@@ -78,21 +78,3 @@ func TestParsePurchaseListOK(t *testing.T) {
 	}
 }
 
-func TestRenderPurchaseListLineWidth(t *testing.T) {
-	items := []purchaseItem{
-		{"Молоко 3.2% 950мл", 2, 89.9, 179.8},
-		{"Хлеб бородинский нарезной длинное название", 1, 45, 45},
-		{"Бананы", 1.25, 99.9, 124.88},
-	}
-	out := renderPurchaseList(items)
-	for i, line := range strings.Split(out, "\n") {
-		if n := len([]rune(line)); n != lineWidth {
-			t.Errorf("строка %d имеет ширину %d рун, ожидалось %d: %q", i, n, lineWidth, line)
-		}
-	}
-	// Итоговая строка должна содержать сумму всех позиций (349,68).
-	if !strings.Contains(out, "349,68") {
-		t.Errorf("нет корректного ИТОГО в выводе:\n%s", out)
-	}
-	t.Logf("\n%s", out)
-}
