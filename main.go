@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -27,6 +26,7 @@ const (
 	alphaOpaque       = 255
 	labelMarginDip    = 12
 	configFilePath    = "config.json"
+	listFontHeightPx  = 30 // высота моноширинного шрифта списка покупок, px
 
 	// appIconResID — числовой ID иконки (RT_GROUP_ICON) в rsrc.syso.
 	// rsrc присваивает ID по порядку: манифест = 1, группа иконок = 2.
@@ -41,12 +41,41 @@ var (
 // Special HWND value for SetWindowPos Z-order, not exported by windigo.
 var hwndTopmost = win.HWND(^uintptr(0)) // HWND_TOPMOST (-1)
 
+// listFont — моноширинный шрифт для списка покупок (создаётся один раз).
+var listFont win.HFONT
+
+// ensureListFont лениво создаёт моноширинный шрифт и кэширует его на время
+// жизни процесса (освобождается ОС при завершении).
+func ensureListFont() win.HFONT {
+	if listFont != 0 {
+		return listFont
+	}
+	lf := win.LOGFONT{
+		Height:  int32(-listFontHeightPx),
+		Weight:  co.FW_NORMAL,
+		CharSet: co.CHARSET_DEFAULT,
+		Quality: co.QUALITY_CLEARTYPE,
+	}
+	lf.SetPitch(co.PITCH_FIXED)
+	lf.SetFamily(co.FF_MODERN)
+	lf.SetLfFaceName("Consolas")
+
+	f, err := win.CreateFontIndirect(&lf)
+	if err != nil {
+		log.Printf("Не удалось создать шрифт списка: %v", err)
+		return 0
+	}
+	listFont = f
+	return f
+}
+
 type windowState struct {
 	mu          sync.RWMutex
 	text        string
 	alpha       byte
 	showLogo    bool
 	showSocials bool
+	items       []purchaseItem
 	wnd         *ui.Main
 	label       *ui.Static
 	logo        *ui.Static
@@ -181,6 +210,9 @@ func ShowMainWindow(state *windowState, cfg appConfig) int {
 
 	wnd.On().WmCreate(func(_ ui.WmCreate) int {
 		state.bindWindow(wnd, lbl, logoStatic, socialsStatic, normal, full)
+		if f := ensureListFont(); f != 0 {
+			lbl.Hwnd().SendMessage(co.WM_SETFONT, win.WPARAM(f), win.LPARAM(1))
+		}
 		applyWindowPlacement(wnd, placement)
 		resizeWindowContent(wnd, lbl, logoStatic, socialsStatic, initialShowLogo, initialShowSocials)
 		if err := applyWindowOpacity(wnd, initialAlpha); err != nil {
@@ -227,15 +259,16 @@ func handleShowRequest(state *windowState) http.HandlerFunc {
 		}
 		defer r.Body.Close()
 
-		var prettyJSON bytes.Buffer
-		if err := json.Indent(&prettyJSON, body, "", "  "); err != nil {
-			prettyJSON.WriteString(string(body))
+		item, err := parsePurchaseItem(body)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
 		}
 
-		state.update(prettyJSON.String(), alphaOpaque, true)
+		count := state.addPurchaseItem(item)
 
 		w.WriteHeader(http.StatusOK)
-		fmt.Fprintln(w, "JSON получен: окно обновлено и сделано непрозрачным")
+		fmt.Fprintf(w, "Позиция добавлена в список (всего: %d)\n", count)
 	}
 }
 
@@ -340,12 +373,48 @@ func (s *windowState) unbindWindow(wnd *ui.Main) {
 	}
 }
 
+// addPurchaseItem добавляет позицию в список покупок и перерисовывает окно.
+// Возвращает количество позиций в списке.
+func (s *windowState) addPurchaseItem(item purchaseItem) int {
+	s.mu.Lock()
+	s.items = append(s.items, item)
+	s.showLogo = true
+	s.showSocials = false
+	s.alpha = alphaOpaque
+	text := renderPurchaseList(s.items)
+	s.text = text
+	count := len(s.items)
+	wnd := s.wnd
+	label := s.label
+	logo := s.logo
+	socials := s.socials
+	normal := s.normal
+	s.mu.Unlock()
+
+	if wnd == nil || label == nil {
+		return count
+	}
+
+	wnd.UiThread(func() {
+		applyWindowPlacement(wnd, normal)
+		if err := label.Hwnd().SetWindowText(text); err != nil {
+			log.Printf("Не удалось обновить текст окна: %v", err)
+		}
+		resizeWindowContent(wnd, label, logo, socials, true, false)
+		if err := applyWindowOpacity(wnd, alphaOpaque); err != nil {
+			log.Printf("Не удалось сделать окно непрозрачным: %v", err)
+		}
+	})
+	return count
+}
+
 func (s *windowState) update(text string, alpha byte, showLogo bool) {
 	s.mu.Lock()
 	s.text = text
 	s.alpha = alpha
 	s.showLogo = showLogo
 	s.showSocials = false
+	s.items = nil
 	wnd := s.wnd
 	label := s.label
 	logo := s.logo

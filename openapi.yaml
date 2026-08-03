@@ -80,42 +80,51 @@ paths:
   /update:
     post:
       tags: [window]
-      summary: Обновить содержимое окна
+      summary: Добавить позицию в список покупок
       description: |
-        Принимает тело запроса и отображает его в окне.
+        Добавляет одну позицию чека в список покупок и отображает его в окне
+        в виде выровненной таблицы (Наименование, Кол-во, Цена, Сумма) с
+        итоговой строкой ИТОГО.
 
-        - Если тело — валидный JSON, оно форматируется с отступом в 2 пробела.
-        - Иначе отображается как plain text.
+        - Каждый запрос добавляет **одну** позицию; список накапливается.
+        - Тело — JSON строго с полями `name`, `quantity`, `price`, `sum`.
+        - Окно становится полностью непрозрачным (alpha = 255).
 
-        Окно становится полностью непрозрачным (alpha = 255).
+        Очистить список (новый чек) — `GET /clear`.
       operationId: updateWindow
       requestBody:
         required: true
-        description: Произвольное содержимое для отображения (обычно JSON)
+        description: Одна позиция чека
         content:
           application/json:
             schema:
-              type: object
-              additionalProperties: true
+              $ref: "#/components/schemas/PurchaseItem"
             example:
-              order_id: 42
-              status: ready
-          text/plain:
-            schema:
-              type: string
-            example: plain text message
-          application/octet-stream:
-            schema:
-              type: string
-              format: binary
+              name: "Молоко 3.2% 950мл"
+              quantity: 2
+              price: 89.90
+              sum: 179.80
       responses:
         "200":
-          description: Окно обновлено
+          description: Позиция добавлена
           content:
             text/plain:
               schema:
                 type: string
-              example: "JSON получен: окно обновлено и сделано непрозрачным"
+              example: "Позиция добавлена в список (всего: 1)"
+        "400":
+          description: Некорректный JSON или отсутствуют обязательные поля
+          content:
+            text/plain:
+              schema:
+                type: string
+              examples:
+                missing:
+                  summary: Нет обязательных полей
+                  value: "отсутствуют или пусты обязательные поля: quantity, sum"
+                badJSON:
+                  summary: Битый JSON
+                  value: "некорректный JSON: unexpected end of JSON input"
         "405":
           $ref: "#/components/responses/MethodNotAllowed"
         "500":
@@ -225,6 +234,27 @@ paths:
 
 components:
   schemas:
+    PurchaseItem:
+      type: object
+      required: [name, quantity, price, sum]
+      properties:
+        name:
+          type: string
+          description: Наименование товара
+          example: "Молоко 3.2% 950мл"
+        quantity:
+          type: number
+          description: Количество (целое или дробное)
+          example: 2
+        price:
+          type: number
+          description: Цена за единицу
+          example: 89.90
+        sum:
+          type: number
+          description: Сумма по позиции
+          example: 179.80
+
     HealthResponse:
       type: object
       required: [status]

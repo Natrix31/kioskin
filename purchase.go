@@ -1,0 +1,184 @@
+package main
+
+import (
+	"bytes"
+	"encoding/json"
+	"fmt"
+	"strconv"
+	"strings"
+)
+
+// Ширины колонок списка покупок (в символах моноширинного шрифта).
+const (
+	colName  = 22 // наименование (слева, длинное обрезается)
+	colQty   = 7  // количество (справа)
+	colPrice = 10 // цена (справа)
+	colSum   = 11 // сумма (справа)
+
+	// Полная ширина строки = сумма колонок + разделяющие пробелы.
+	lineWidth = colName + 1 + colQty + 1 + colPrice + 1 + colSum
+)
+
+// purchaseItem — одна позиция чека.
+type purchaseItem struct {
+	Name     string
+	Quantity float64
+	Price    float64
+	Sum      float64
+}
+
+// purchaseInput — тело запроса /update. Указатели нужны, чтобы отличить
+// отсутствующее поле от нулевого значения.
+type purchaseInput struct {
+	Name     *string  `json:"name"`
+	Quantity *float64 `json:"quantity"`
+	Price    *float64 `json:"price"`
+	Sum      *float64 `json:"sum"`
+}
+
+// parsePurchaseItem разбирает JSON тела /update и проверяет обязательные поля.
+func parsePurchaseItem(body []byte) (purchaseItem, error) {
+	var in purchaseInput
+	dec := json.NewDecoder(bytes.NewReader(body))
+	if err := dec.Decode(&in); err != nil {
+		return purchaseItem{}, fmt.Errorf("некорректный JSON: %v", err)
+	}
+
+	var missing []string
+	if in.Name == nil || strings.TrimSpace(*in.Name) == "" {
+		missing = append(missing, "name")
+	}
+	if in.Quantity == nil {
+		missing = append(missing, "quantity")
+	}
+	if in.Price == nil {
+		missing = append(missing, "price")
+	}
+	if in.Sum == nil {
+		missing = append(missing, "sum")
+	}
+	if len(missing) > 0 {
+		return purchaseItem{}, fmt.Errorf(
+			"отсутствуют или пусты обязательные поля: %s", strings.Join(missing, ", "))
+	}
+
+	return purchaseItem{
+		Name:     strings.TrimSpace(*in.Name),
+		Quantity: *in.Quantity,
+		Price:    *in.Price,
+		Sum:      *in.Sum,
+	}, nil
+}
+
+// renderPurchaseList строит выровненную по колонкам таблицу списка покупок
+// с шапкой и итоговой строкой.
+func renderPurchaseList(items []purchaseItem) string {
+	var b strings.Builder
+
+	b.WriteString(padRight("НАИМЕНОВАНИЕ", colName))
+	b.WriteByte(' ')
+	b.WriteString(padLeft("КОЛ-ВО", colQty))
+	b.WriteByte(' ')
+	b.WriteString(padLeft("ЦЕНА", colPrice))
+	b.WriteByte(' ')
+	b.WriteString(padLeft("СУММА", colSum))
+	b.WriteByte('\n')
+	b.WriteString(strings.Repeat("─", lineWidth))
+	b.WriteByte('\n')
+
+	var total float64
+	for _, it := range items {
+		b.WriteString(padRight(it.Name, colName))
+		b.WriteByte(' ')
+		b.WriteString(padLeft(formatQty(it.Quantity), colQty))
+		b.WriteByte(' ')
+		b.WriteString(padLeft(formatMoney(it.Price), colPrice))
+		b.WriteByte(' ')
+		b.WriteString(padLeft(formatMoney(it.Sum), colSum))
+		b.WriteByte('\n')
+		total += it.Sum
+	}
+
+	b.WriteString(strings.Repeat("─", lineWidth))
+	b.WriteByte('\n')
+	// "ИТОГО" занимает все колонки слева от суммы.
+	b.WriteString(padRight("ИТОГО", colName+1+colQty+1+colPrice))
+	b.WriteByte(' ')
+	b.WriteString(padLeft(formatMoney(total), colSum))
+
+	return b.String()
+}
+
+// padRight дополняет строку пробелами справа до ширины w (по рунам).
+// Слишком длинная строка обрезается с добавлением «…».
+func padRight(s string, w int) string {
+	r := []rune(s)
+	if len(r) > w {
+		if w <= 1 {
+			return string(r[:w])
+		}
+		return string(r[:w-1]) + "…"
+	}
+	return s + strings.Repeat(" ", w-len(r))
+}
+
+// padLeft дополняет строку пробелами слева до ширины w (по рунам).
+func padLeft(s string, w int) string {
+	r := []rune(s)
+	if len(r) >= w {
+		return s
+	}
+	return strings.Repeat(" ", w-len(r)) + s
+}
+
+// formatMoney форматирует сумму: два знака после запятой, разделитель разрядов
+// — пробел, десятичный разделитель — запятая (1 234,50).
+func formatMoney(v float64) string {
+	neg := v < 0
+	if neg {
+		v = -v
+	}
+	cents := int64(v*100 + 0.5)
+	rub := cents / 100
+	kop := cents % 100
+
+	s := groupThousands(rub) + "," + fmt.Sprintf("%02d", kop)
+	if neg {
+		s = "-" + s
+	}
+	return s
+}
+
+// formatQty форматирует количество: до 3 знаков после запятой без хвостовых
+// нулей, десятичный разделитель — запятая (2, 1,5, 0,75).
+func formatQty(v float64) string {
+	s := strconv.FormatFloat(v, 'f', 3, 64)
+	if strings.Contains(s, ".") {
+		s = strings.TrimRight(s, "0")
+		s = strings.TrimRight(s, ".")
+	}
+	if s == "" || s == "-0" {
+		s = "0"
+	}
+	return strings.Replace(s, ".", ",", 1)
+}
+
+// groupThousands вставляет пробелы между разрядами тысяч (1234567 -> 1 234 567).
+func groupThousands(n int64) string {
+	digits := strconv.FormatInt(n, 10)
+	if len(digits) <= 3 {
+		return digits
+	}
+	var b strings.Builder
+	pre := len(digits) % 3
+	if pre > 0 {
+		b.WriteString(digits[:pre])
+	}
+	for i := pre; i < len(digits); i += 3 {
+		if b.Len() > 0 {
+			b.WriteByte(' ')
+		}
+		b.WriteString(digits[i : i+3])
+	}
+	return b.String()
+}
