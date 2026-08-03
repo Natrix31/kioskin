@@ -29,8 +29,9 @@ const (
 	configFilePath    = "config.json"
 
 	// appIconResID — числовой ID иконки (RT_GROUP_ICON) в rsrc.syso.
-	// rsrc без манифеста присваивает первой группе иконок ID = 1.
-	appIconResID = 1
+	// rsrc присваивает ID по порядку: манифест = 1, группа иконок = 2.
+	// (Без манифеста было бы 1 — см. команду сборки rsrc в README.)
+	appIconResID = 2
 )
 
 var (
