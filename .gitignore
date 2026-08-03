@@ -16,5 +16,6 @@ kioskin
 # Local / OS
 config.json
 *.log
+*.cfe
 Thumbs.db
 Desktop.ini
