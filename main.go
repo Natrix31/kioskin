@@ -157,6 +157,8 @@ func main() {
 		}
 	}()
 
+	startUpdater(runtimeState)
+
 	for !runtimeState.isShuttingDown() {
 		ShowMainWindow(state, cfg)
 	}
@@ -301,7 +303,7 @@ func handleHealthcheck() http.HandlerFunc {
 
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		fmt.Fprintln(w, `{"status":"ok"}`)
+		fmt.Fprintf(w, "{\"status\":\"ok\",\"version\":%q}\n", version)
 	}
 }
 

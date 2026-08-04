@@ -1,0 +1,38 @@
+name: release
+
+# Собирает kioskin.exe и публикует его в GitHub Release при пуше тега вида vX.Y.Z.
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Build (version = tag)
+        shell: bash
+        run: |
+          go build -ldflags "-H=windowsgui -X main.version=${GITHUB_REF_NAME}" -o kioskin.exe .
+
+      - name: SHA-256
+        shell: bash
+        run: |
+          sha256sum kioskin.exe | awk '{print $1}' > kioskin.exe.sha256
+          cat kioskin.exe.sha256
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            kioskin.exe
+            kioskin.exe.sha256

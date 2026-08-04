@@ -37,6 +37,7 @@ paths:
                 $ref: "#/components/schemas/HealthResponse"
               example:
                 status: ok
+                version: v1.0.0
         "405":
           $ref: "#/components/responses/MethodNotAllowed"
 
@@ -277,12 +278,16 @@ components:
 
     HealthResponse:
       type: object
-      required: [status]
+      required: [status, version]
       properties:
         status:
           type: string
           enum: [ok]
           example: ok
+        version:
+          type: string
+          description: Версия сборки (dev для локальных сборок, тег релиза для CI)
+          example: v1.0.0
 
     MonitorInfo:
       type: object
