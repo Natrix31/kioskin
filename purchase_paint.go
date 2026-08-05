@@ -29,9 +29,9 @@ func solidBrush(c win.COLORREF) win.HBRUSH {
 
 // Цвета текста.
 var (
-	clrText   = win.RGB(30, 30, 30)   // обычные строки
+	clrText   = win.RGB(30, 30, 30)    // обычные строки
 	clrHeadTx = win.RGB(255, 255, 255) // шапка
-	clrTotTx  = win.RGB(20, 20, 20)    // ИТОГО
+	clrTotTx  = win.RGB(255, 255, 255) // ИТОГО
 )
 
 // Кисти фона (создаются один раз, живут до завершения процесса).
@@ -47,11 +47,12 @@ func ensureBrushes() {
 	if brBg != 0 {
 		return
 	}
+	// Зелёная палитра в тон логотипа «Table.Точка» (зелёный ≈ RGB 0,155,60).
 	brBg = solidBrush(win.RGB(255, 255, 255))
-	brRowA = solidBrush(win.RGB(255, 255, 255))
-	brRowB = solidBrush(win.RGB(232, 238, 247))
-	brHeader = solidBrush(win.RGB(19, 151, 64)) // зелёный, как крест на логотипе
-	brTotal = solidBrush(win.RGB(255, 243, 205))
+	brRowA = solidBrush(win.RGB(245, 251, 247)) // почти белый с зелёным оттенком
+	brRowB = solidBrush(win.RGB(223, 242, 230)) // светло-зелёный (зебра)
+	brHeader = solidBrush(win.RGB(0, 155, 60))  // зелёный логотипа
+	brTotal = solidBrush(win.RGB(0, 120, 46))   // насыщенный зелёный для ИТОГО
 }
 
 // drawPurchaseList рисует таблицу списка покупок в прямоугольнике rc на hdc:
