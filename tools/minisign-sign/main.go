@@ -21,6 +21,9 @@ import (
 	"kioskin/internal/minisig"
 )
 
+// bom — UTF-8 Byte Order Mark (U+FEFF), заданный без литерала в исходнике.
+var bom = string(rune(0xFEFF))
+
 func main() {
 	in := flag.String("in", "", "подписываемый файл")
 	out := flag.String("out", "", "файл подписи (.minisig)")
@@ -31,11 +34,11 @@ func main() {
 		log.Fatal("нужны -in и -out")
 	}
 
-	seed, err := hex.DecodeString(strings.TrimSpace(os.Getenv("MINISIGN_SECRET_SEED")))
+	seed, err := hex.DecodeString(cleanHex(os.Getenv("MINISIGN_SECRET_SEED")))
 	if err != nil || len(seed) == 0 {
 		log.Fatal("MINISIGN_SECRET_SEED: некорректный или пустой hex")
 	}
-	keyID, err := hex.DecodeString(strings.TrimSpace(os.Getenv("MINISIGN_KEY_ID")))
+	keyID, err := hex.DecodeString(cleanHex(os.Getenv("MINISIGN_KEY_ID")))
 	if err != nil || len(keyID) == 0 {
 		log.Fatal("MINISIGN_KEY_ID: некорректный или пустой hex")
 	}
@@ -54,4 +57,10 @@ func main() {
 		log.Fatal(err)
 	}
 	fmt.Printf("подписан %s -> %s\n", *in, *out)
+}
+
+// cleanHex убирает UTF-8 BOM и пробельные символы, которые может добавить
+// оболочка/CI при передаче секрета (напр. PowerShell-пайп добавляет BOM и \n).
+func cleanHex(s string) string {
+	return strings.TrimSpace(strings.TrimPrefix(s, bom))
 }
