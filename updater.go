@@ -2,8 +2,6 @@ package main
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -11,7 +9,6 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
-	"strings"
 	"time"
 )
 
@@ -19,7 +16,7 @@ const (
 	updateRepo     = "Natrix31/kioskin"
 	updateInterval = time.Hour
 	updateAssetExe = "kioskin.exe"
-	updateAssetSum = "kioskin.exe.sha256"
+	updateAssetSig = "kioskin.exe.minisig"
 	updateUA       = "kioskin-updater"
 )
 
@@ -99,9 +96,9 @@ func checkForUpdate(app *appRuntime) {
 	}
 
 	exeURL := rel.assetURL(updateAssetExe)
-	sumURL := rel.assetURL(updateAssetSum)
-	if exeURL == "" || sumURL == "" {
-		log.Printf("В релизе %s нет нужных ассетов (%s, %s)", rel.TagName, updateAssetExe, updateAssetSum)
+	sigURL := rel.assetURL(updateAssetSig)
+	if exeURL == "" || sigURL == "" {
+		log.Printf("В релизе %s нет нужных ассетов (%s, %s)", rel.TagName, updateAssetExe, updateAssetSig)
 		return
 	}
 
@@ -110,20 +107,16 @@ func checkForUpdate(app *appRuntime) {
 		log.Printf("Не удалось скачать бинарник: %v", err)
 		return
 	}
-	sumData, err := download(sumURL)
+	sigData, err := download(sigURL)
 	if err != nil {
-		log.Printf("Не удалось скачать контрольную сумму: %v", err)
-		return
-	}
-	wantSum, err := parseChecksum(sumData)
-	if err != nil {
-		log.Printf("Некорректная контрольная сумма: %v", err)
+		log.Printf("Не удалось скачать подпись: %v", err)
 		return
 	}
 
-	gotSum := sha256.Sum256(data)
-	if hex.EncodeToString(gotSum[:]) != wantSum {
-		log.Printf("SHA-256 не совпал — обновление отклонено")
+	// Проверка цифровой подписи: подтверждает и целостность, и подлинность
+	// (что бинарник собран и подписан нашим ключом).
+	if err := verifyReleaseSignature(data, sigData); err != nil {
+		log.Printf("Проверка подписи не пройдена — обновление отклонено: %v", err)
 		return
 	}
 
@@ -176,19 +169,6 @@ func download(url string) ([]byte, error) {
 		return nil, fmt.Errorf("HTTP %d", resp.StatusCode)
 	}
 	return io.ReadAll(resp.Body)
-}
-
-// parseChecksum извлекает hex-сумму из файла вида "<hex>" или "<hex>  kioskin.exe".
-func parseChecksum(data []byte) (string, error) {
-	fields := strings.Fields(string(data))
-	if len(fields) == 0 {
-		return "", fmt.Errorf("пустой файл")
-	}
-	sum := strings.ToLower(fields[0])
-	if len(sum) != 64 {
-		return "", fmt.Errorf("ожидалась SHA-256 из 64 символов, получено %d", len(sum))
-	}
-	return sum, nil
 }
 
 // applyUpdate записывает новый бинарник рядом, подменяет текущий exe

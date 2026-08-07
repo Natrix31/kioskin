@@ -30,9 +30,18 @@ jobs:
           sha256sum kioskin.exe | awk '{print $1}' > kioskin.exe.sha256
           cat kioskin.exe.sha256
 
+      - name: Sign (minisign)
+        shell: bash
+        env:
+          MINISIGN_SECRET_SEED: ${{ secrets.MINISIGN_SECRET_SEED }}
+          MINISIGN_KEY_ID: ${{ secrets.MINISIGN_KEY_ID }}
+        run: |
+          go run ./tools/minisign-sign -in kioskin.exe -out kioskin.exe.minisig -comment "kioskin ${GITHUB_REF_NAME}"
+
       - name: Publish release
         uses: softprops/action-gh-release@v2
         with:
           files: |
             kioskin.exe
             kioskin.exe.sha256
+            kioskin.exe.minisig

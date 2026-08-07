@@ -17,5 +17,10 @@ kioskin
 config.json
 *.log
 *.cfe
+
+# minisign приватные ключи — НИКОГДА не коммитить (только в секретах CI)
+*.sec
+minisign_seed.txt
+minisign_keyid.txt
 Thumbs.db
 Desktop.ini
