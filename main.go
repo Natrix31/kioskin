@@ -87,6 +87,8 @@ type windowState struct {
 type appConfig struct {
 	MonitorIndex int    `json:"monitor_index"`
 	LogoPath     string `json:"logo_path"`
+	TelegramURL  string `json:"telegram_url"`
+	MaxURL       string `json:"max_url"`
 }
 
 type windowPlacement struct {
@@ -131,6 +133,7 @@ func main() {
 	if err := initAppSocials(); err != nil {
 		log.Printf("Не удалось загрузить socials-картинку: %v", err)
 	}
+	initAppQRCodes(cfg)
 	state := newWindowState()
 	mux := http.NewServeMux()
 	server := &http.Server{
@@ -226,7 +229,7 @@ func ShowMainWindow(state *windowState, cfg appConfig) int {
 		if dis.HwndItem != lbl.Hwnd() {
 			return
 		}
-		drawPurchaseList(dis.Hdc, dis.RcItem, state.snapshotItems())
+		drawWindowContent(dis.Hdc, dis.RcItem, state.snapshotItems())
 	})
 	wnd.On().WmSize(func(_ ui.WmSize) {
 		showLogo, showSocials := state.contentFlags()
@@ -521,13 +524,15 @@ func loadConfig(path string) appConfig {
 	return cfg
 }
 
+// initialWindowPlacement возвращает размещение основного окна: на весь выбранный
+// монитор (а не в половину экрана, как раньше).
 func initialWindowPlacement(cfg appConfig) windowPlacement {
 	if rect, ok := monitorRectByIndex(cfg.MonitorIndex); ok {
 		return windowPlacement{
 			x:      rect.Left,
-			y:      rect.Bottom / 2,
+			y:      rect.Top,
 			width:  rect.Right - rect.Left,
-			height: (rect.Bottom - rect.Top) / 2,
+			height: rect.Bottom - rect.Top,
 		}
 	}
 
@@ -545,7 +550,7 @@ func initialWindowPlacement(cfg appConfig) windowPlacement {
 		x:      0,
 		y:      0,
 		width:  screenWidth,
-		height: screenHeight / 2,
+		height: screenHeight,
 	}
 }
 
