@@ -41,10 +41,11 @@ func initAppQRCodes(cfg appConfig) {
 
 // Геометрия полосы QR (px при 96 DPI).
 const (
-	qrPad      = 18  // отступ вокруг QR внутри ячейки
-	qrCaptionH = 40  // высота строки подписи (≈ высота шрифта списка + запас)
-	qrMaxSize  = 420 // максимальный размер QR, чтобы не раздувать на 4K
-	qrMinSize  = 64  // минимальный размер QR
+	qrPad        = 18  // отступ вокруг QR внутри ячейки
+	qrCaptionH   = 40  // высота строки подписи (≈ высота шрифта списка + запас)
+	qrMaxSize    = 420 // максимальный размер QR в полосе под списком
+	qrMinSize    = 64  // минимальный размер QR
+	qrSocialsMax = 900 // максимальный размер QR в полноэкранном режиме /socials
 )
 
 // qrMetrics вычисляет высоту полосы QR и размер стороны одного QR-кода для
@@ -90,17 +91,64 @@ func drawWindowContent(hdc win.HDC, rc win.RECT, items []purchaseItem) {
 // drawQRBand рисует полосу QR-кодов внизу области rc: каждый код по центру своей
 // ячейки, под ним — подпись. Полоса заливается фоном списка (непрозрачная).
 func drawQRBand(hdc win.HDC, rc win.RECT, entries []qrEntry) {
-	n := int32(len(entries))
-	if n == 0 {
+	if len(entries) == 0 {
 		return
 	}
 	ensureBrushes()
 
-	band, qr := qrMetrics(rc.Right-rc.Left, rc.Bottom-rc.Top, n)
+	band, qr := qrMetrics(rc.Right-rc.Left, rc.Bottom-rc.Top, int32(len(entries)))
 	top := rc.Bottom - band
 
 	// Фон полосы (непрозрачный, в тон списка).
 	fillRow(hdc, rc.Left, top, rc.Right, rc.Bottom, brBg)
+	drawQRRow(hdc, rc.Left, rc.Right, top+qrPad, qr, entries)
+}
+
+// drawSocialsQRCodes рисует QR-коды крупно по центру всей области rc (режим
+// /socials): без списка покупок, только коды с подписями.
+func drawSocialsQRCodes(hdc win.HDC, rc win.RECT) {
+	ensureBrushes()
+
+	// Непрозрачный фон на весь экран.
+	fillRow(hdc, rc.Left, rc.Top, rc.Right, rc.Bottom, brBg)
+
+	entries := appQRCodes
+	n := int32(len(entries))
+	if n == 0 {
+		return
+	}
+
+	w := rc.Right - rc.Left
+	h := rc.Bottom - rc.Top
+
+	qr := w/n - 2*qrPad
+	if maxByH := h - qrCaptionH - 4*qrPad; qr > maxByH {
+		qr = maxByH
+	}
+	if qr > qrSocialsMax {
+		qr = qrSocialsMax
+	}
+	if qr < qrMinSize {
+		qr = qrMinSize
+	}
+
+	// Вертикально центрируем блок «QR + подпись».
+	blockH := qr + qrPad/2 + qrCaptionH
+	top := rc.Top + (h-blockH)/2
+	if top < rc.Top {
+		top = rc.Top
+	}
+	drawQRRow(hdc, rc.Left, rc.Right, top, qr, entries)
+}
+
+// drawQRRow рисует entries в один ряд: каждый QR стороной qr по центру своей
+// ячейки, верхний край на y = top, под ним — подпись. Шрифт и цвет текста
+// настраиваются здесь же.
+func drawQRRow(hdc win.HDC, left, right, top, qr int32, entries []qrEntry) {
+	n := int32(len(entries))
+	if n == 0 {
+		return
+	}
 
 	if f := ensureListFont(); f != 0 {
 		hdc.SelectObjectFont(f)
@@ -108,20 +156,17 @@ func drawQRBand(hdc win.HDC, rc win.RECT, entries []qrEntry) {
 	hdc.SetBkMode(co.BKMODE_TRANSPARENT)
 	hdc.SetTextColor(clrText)
 
-	cellW := (rc.Right - rc.Left) / n
+	cellW := (right - left) / n
 	for i, e := range entries {
-		cx := rc.Left + cellW*int32(i) + cellW/2
-		qy := top + qrPad
+		cx := left + cellW*int32(i) + cellW/2
 
 		img := e.code.Image(int(qr))
 		aw := int32(img.Bounds().Dx())
 		ah := int32(img.Bounds().Dy())
-		ix := cx - aw/2
-		iy := qy + (qr-ah)/2
-		blitImage(hdc, ix, iy, img)
+		blitImage(hdc, cx-aw/2, top+(qr-ah)/2, img)
 
 		tw := textWidth(hdc, e.caption)
-		hdc.TextOut(int(cx-tw/2), int(qy+qr+qrPad/2), e.caption)
+		hdc.TextOut(int(cx-tw/2), int(top+qr+qrPad/2), e.caption)
 	}
 }
 

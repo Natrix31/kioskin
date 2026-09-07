@@ -79,7 +79,6 @@ type windowState struct {
 	wnd         *ui.Main
 	label       *ui.Static
 	logo        *ui.Static
-	socials     *ui.Static
 	normal      windowPlacement
 	full        windowPlacement
 }
@@ -129,9 +128,6 @@ func main() {
 	cfg := loadConfig(configFilePath)
 	if err := initAppLogo(cfg); err != nil {
 		log.Printf("Не удалось загрузить логотип: %v", err)
-	}
-	if err := initAppSocials(); err != nil {
-		log.Printf("Не удалось загрузить socials-картинку: %v", err)
 	}
 	initAppQRCodes(cfg)
 	state := newWindowState()
@@ -196,17 +192,9 @@ func ShowMainWindow(state *windowState, cfg appConfig) int {
 			Position(ui.Dpi(10, 12)),
 	)
 
-	socialsStatic := ui.NewStatic(
-		wnd,
-		ui.OptsStatic().
-			CtrlStyle(co.SS_BITMAP).
-			WndStyle(co.WS_CHILD).
-			Size(ui.Dpi(200, 80)).
-			Position(ui.Dpi(0, 0)),
-	)
-
 	// Список покупок рисуется вручную (owner-draw) — так возможны чередующийся
-	// фон строк и перенос длинных наименований.
+	// фон строк и перенос длинных наименований. В режиме /socials эта же область
+	// растягивается на весь экран и рисует QR-коды.
 	lbl := ui.NewStatic(
 		wnd,
 		ui.OptsStatic().
@@ -216,9 +204,9 @@ func ShowMainWindow(state *windowState, cfg appConfig) int {
 	)
 
 	wnd.On().WmCreate(func(_ ui.WmCreate) int {
-		state.bindWindow(wnd, lbl, logoStatic, socialsStatic, normal, full)
+		state.bindWindow(wnd, lbl, logoStatic, normal, full)
 		applyWindowPlacement(wnd, placement)
-		resizeWindowContent(wnd, lbl, logoStatic, socialsStatic, initialShowLogo, initialShowSocials)
+		resizeWindowContent(wnd, lbl, logoStatic, initialShowLogo, initialShowSocials)
 		if err := applyWindowOpacity(wnd, initialAlpha); err != nil {
 			log.Printf("Не удалось применить прозрачность окна: %v", err)
 		}
@@ -229,11 +217,15 @@ func ShowMainWindow(state *windowState, cfg appConfig) int {
 		if dis.HwndItem != lbl.Hwnd() {
 			return
 		}
+		if _, showSocials := state.contentFlags(); showSocials {
+			drawSocialsQRCodes(dis.Hdc, dis.RcItem)
+			return
+		}
 		drawWindowContent(dis.Hdc, dis.RcItem, state.snapshotItems())
 	})
 	wnd.On().WmSize(func(_ ui.WmSize) {
 		showLogo, showSocials := state.contentFlags()
-		resizeWindowContent(wnd, lbl, logoStatic, socialsStatic, showLogo, showSocials)
+		resizeWindowContent(wnd, lbl, logoStatic, showLogo, showSocials)
 	})
 	wnd.On().WmDestroy(func() {
 		state.unbindWindow(wnd)
@@ -252,7 +244,7 @@ func handleSocialsRequest(state *windowState) http.HandlerFunc {
 		state.enterSocialsMode()
 
 		w.WriteHeader(http.StatusOK)
-		fmt.Fprintln(w, "Окно развёрнуто на весь экран, показана картинка socials")
+		fmt.Fprintln(w, "Окно развёрнуто на весь экран, показаны QR-коды")
 	}
 }
 
@@ -368,13 +360,12 @@ func (s *windowState) snapshotItems() []purchaseItem {
 	return s.items
 }
 
-func (s *windowState) bindWindow(wnd *ui.Main, label, logo, socials *ui.Static, normal, full windowPlacement) {
+func (s *windowState) bindWindow(wnd *ui.Main, label, logo *ui.Static, normal, full windowPlacement) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.wnd = wnd
 	s.label = label
 	s.logo = logo
-	s.socials = socials
 	s.normal = normal
 	s.full = full
 }
@@ -386,7 +377,6 @@ func (s *windowState) unbindWindow(wnd *ui.Main) {
 		s.wnd = nil
 		s.label = nil
 		s.logo = nil
-		s.socials = nil
 	}
 }
 
@@ -402,7 +392,6 @@ func (s *windowState) setPurchaseItems(items []purchaseItem) int {
 	wnd := s.wnd
 	label := s.label
 	logo := s.logo
-	socials := s.socials
 	normal := s.normal
 	s.mu.Unlock()
 
@@ -412,7 +401,7 @@ func (s *windowState) setPurchaseItems(items []purchaseItem) int {
 
 	wnd.UiThread(func() {
 		applyWindowPlacement(wnd, normal)
-		resizeWindowContent(wnd, label, logo, socials, true, false)
+		resizeWindowContent(wnd, label, logo, true, false)
 		if err := label.Hwnd().InvalidateRect(nil, false); err != nil {
 			log.Printf("Не удалось перерисовать список: %v", err)
 		}
@@ -433,7 +422,6 @@ func (s *windowState) update(text string, alpha byte, showLogo bool) {
 	wnd := s.wnd
 	label := s.label
 	logo := s.logo
-	socials := s.socials
 	normal := s.normal
 	s.mu.Unlock()
 
@@ -443,7 +431,7 @@ func (s *windowState) update(text string, alpha byte, showLogo bool) {
 
 	wnd.UiThread(func() {
 		applyWindowPlacement(wnd, normal)
-		resizeWindowContent(wnd, label, logo, socials, showLogo, false)
+		resizeWindowContent(wnd, label, logo, showLogo, false)
 		if err := label.Hwnd().InvalidateRect(nil, false); err != nil {
 			log.Printf("Не удалось перерисовать окно: %v", err)
 		}
@@ -454,7 +442,7 @@ func (s *windowState) update(text string, alpha byte, showLogo bool) {
 }
 
 // enterSocialsMode switches the window to full-screen mode: it fills the target
-// monitor, becomes fully opaque and displays the socials image.
+// monitor, becomes fully opaque and displays the QR codes (no purchase list).
 func (s *windowState) enterSocialsMode() {
 	s.mu.Lock()
 	s.showSocials = true
@@ -463,17 +451,19 @@ func (s *windowState) enterSocialsMode() {
 	wnd := s.wnd
 	label := s.label
 	logo := s.logo
-	socials := s.socials
 	full := s.full
 	s.mu.Unlock()
 
-	if wnd == nil {
+	if wnd == nil || label == nil {
 		return
 	}
 
 	wnd.UiThread(func() {
 		applyWindowPlacement(wnd, full)
-		resizeWindowContent(wnd, label, logo, socials, false, true)
+		resizeWindowContent(wnd, label, logo, false, true)
+		if err := label.Hwnd().InvalidateRect(nil, false); err != nil {
+			log.Printf("Не удалось перерисовать QR-коды: %v", err)
+		}
 		if err := applyWindowOpacity(wnd, alphaOpaque); err != nil {
 			log.Printf("Не удалось сделать окно непрозрачным: %v", err)
 		}

@@ -186,28 +186,6 @@ func setControlVisible(ctrl *ui.Static, visible bool) {
 	ctrl.Hwnd().ShowWindow(cmd)
 }
 
-// calcContainSize fits a src×src image inside box×box preserving aspect ratio.
-func calcContainSize(srcW, srcH, boxW, boxH int32) (int32, int32) {
-	if srcW < 1 || srcH < 1 || boxW < 1 || boxH < 1 {
-		return boxW, boxH
-	}
-	// Compare aspect ratios without floats: srcW/srcH vs boxW/boxH.
-	if srcW*boxH < boxW*srcH {
-		// Height-bound: scale to full box height.
-		w := srcW * boxH / srcH
-		if w < 1 {
-			w = 1
-		}
-		return w, boxH
-	}
-	// Width-bound: scale to full box width.
-	h := srcH * boxW / srcW
-	if h < 1 {
-		h = 1
-	}
-	return boxW, h
-}
-
 func calcLogoSize(clientWidth, clientHeight, margin int32) (int32, int32) {
 	if appLogo == nil {
 		return 0, 0
@@ -234,7 +212,7 @@ func calcLogoSize(clientWidth, clientHeight, margin int32) (int32, int32) {
 	return logoWidth, logoHeight
 }
 
-func resizeWindowContent(wnd *ui.Main, label, logo, socials *ui.Static, showLogo, showSocials bool) {
+func resizeWindowContent(wnd *ui.Main, label, logo *ui.Static, showLogo, showSocials bool) {
 	clientRect, err := wnd.Hwnd().GetClientRect()
 	if err != nil {
 		log.Printf("Не удалось получить размер клиентской области: %v", err)
@@ -246,22 +224,14 @@ func resizeWindowContent(wnd *ui.Main, label, logo, socials *ui.Static, showLogo
 	clientHeight := clientRect.Bottom - clientRect.Top
 
 	if showSocials {
+		// Режим /socials: логотип скрыт, owner-draw область растянута на весь
+		// экран — в ней рисуются QR-коды (см. drawSocialsQRCodes).
 		setControlVisible(logo, false)
-		setControlVisible(label, false)
-		if socials == nil || appSocials == nil {
-			setControlVisible(socials, false)
-			return
-		}
-		imgW, imgH := calcContainSize(appSocials.width, appSocials.height, clientWidth, clientHeight)
-		imgX := (clientWidth - imgW) / 2
-		imgY := (clientHeight - imgH) / 2
-		applyImageAtSize(socials, appSocials, imgW, imgH)
-		resizeControl(wnd, socials, imgX, imgY, imgW, imgH)
-		setControlVisible(socials, true)
+		resizeControl(wnd, label, 0, 0, clientWidth, clientHeight)
+		setControlVisible(label, true)
 		return
 	}
 
-	setControlVisible(socials, false)
 	setControlVisible(label, true)
 
 	if !showLogo || logo == nil || appLogo == nil {
