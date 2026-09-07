@@ -217,11 +217,14 @@ func ShowMainWindow(state *windowState, cfg appConfig) int {
 		if dis.HwndItem != lbl.Hwnd() {
 			return
 		}
-		if _, showSocials := state.contentFlags(); showSocials {
+		showLogo, showSocials := state.contentFlags()
+		if showSocials {
 			drawSocialsQRCodes(dis.Hdc, dis.RcItem)
 			return
 		}
-		drawWindowContent(dis.Hdc, dis.RcItem, state.snapshotItems())
+		// QR-полосу показываем только в режиме списка (пречек), а не в стартовом
+		// полупрозрачном состоянии.
+		drawWindowContent(dis.Hdc, dis.RcItem, state.snapshotItems(), showLogo)
 	})
 	wnd.On().WmSize(func(_ ui.WmSize) {
 		showLogo, showSocials := state.contentFlags()

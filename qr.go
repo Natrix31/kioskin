@@ -1,7 +1,9 @@
 package main
 
 import (
+	_ "embed"
 	"image"
+	"image/color"
 	"log"
 
 	"github.com/rodrigocfd/windigo/co"
@@ -9,10 +11,17 @@ import (
 	"github.com/skip2/go-qrcode"
 )
 
-// qrEntry — один QR-код с подписью под ним.
+//go:embed assets/TelegramLogo.png
+var telegramLogoPNG []byte
+
+//go:embed assets/MAX-256x256.png
+var maxLogoPNG []byte
+
+// qrEntry — один QR-код с подписью и логотипом приложения под ним.
 type qrEntry struct {
 	code    *qrcode.QRCode
 	caption string
+	logo    *logoSource // логотип рядом с подписью; nil — только подпись
 }
 
 // appQRCodes — QR-коды, показываемые в нижней части основного окна. Заполняется
@@ -24,7 +33,7 @@ var appQRCodes []qrEntry
 // пропускается. Ошибка кодирования не фатальна: просто без этого QR.
 func initAppQRCodes(cfg appConfig) {
 	appQRCodes = appQRCodes[:0]
-	add := func(url, caption string) {
+	add := func(url, caption string, logoPNG []byte) {
 		if url == "" {
 			return
 		}
@@ -33,10 +42,16 @@ func initAppQRCodes(cfg appConfig) {
 			log.Printf("Не удалось сгенерировать QR для %s (%s): %v", caption, url, err)
 			return
 		}
-		appQRCodes = append(appQRCodes, qrEntry{code: code, caption: caption})
+		entry := qrEntry{code: code, caption: caption}
+		if logo, err := decodeLogoImage(logoPNG); err != nil {
+			log.Printf("Не удалось декодировать логотип %s: %v", caption, err)
+		} else {
+			entry.logo = logo
+		}
+		appQRCodes = append(appQRCodes, entry)
 	}
-	add(cfg.TelegramURL, "Telegram")
-	add(cfg.MaxURL, "MAX")
+	add(cfg.TelegramURL, "Telegram", telegramLogoPNG)
+	add(cfg.MaxURL, "MAX", maxLogoPNG)
 }
 
 // Геометрия полосы QR (px при 96 DPI).
@@ -70,9 +85,10 @@ func qrMetrics(w, h, n int32) (band, qr int32) {
 }
 
 // drawWindowContent рисует содержимое основного окна: список покупок сверху и,
-// если заданы ссылки, полосу QR-кодов внизу.
-func drawWindowContent(hdc win.HDC, rc win.RECT, items []purchaseItem) {
-	if len(appQRCodes) == 0 {
+// если заданы ссылки и showQR=true (режим списка/пречека), полосу QR-кодов внизу.
+// В стартовом полупрозрачном состоянии showQR=false — QR не показываются.
+func drawWindowContent(hdc win.HDC, rc win.RECT, items []purchaseItem, showQR bool) {
+	if !showQR || len(appQRCodes) == 0 {
 		drawPurchaseList(hdc, rc, items)
 		return
 	}
@@ -156,6 +172,11 @@ func drawQRRow(hdc win.HDC, left, right, top, qr int32, entries []qrEntry) {
 	hdc.SetBkMode(co.BKMODE_TRANSPARENT)
 	hdc.SetTextColor(clrText)
 
+	textH := int32(28)
+	if tm, err := hdc.GetTextMetrics(); err == nil {
+		textH = int32(tm.Height)
+	}
+
 	cellW := (right - left) / n
 	for i, e := range entries {
 		cx := left + cellW*int32(i) + cellW/2
@@ -165,13 +186,116 @@ func drawQRRow(hdc win.HDC, left, right, top, qr int32, entries []qrEntry) {
 		ah := int32(img.Bounds().Dy())
 		blitImage(hdc, cx-aw/2, top+(qr-ah)/2, img)
 
+		// Строка подписи: [логотип] Название — по центру под QR.
+		capY := top + qr + qrPad/2
 		tw := textWidth(hdc, e.caption)
-		hdc.TextOut(int(cx-tw/2), int(top+qr+qrPad/2), e.caption)
+
+		const logoGap = 10
+		var (
+			logoImg image.Image
+			logoW   int32
+			logoH   int32
+		)
+		if e.logo != nil {
+			logoW, logoH = containSize(e.logo.width, e.logo.height, textH*3/2)
+			logoImg = scaleLogoOverWhite(e.logo.img, int(logoW), int(logoH))
+		}
+
+		totalW := tw
+		if logoImg != nil {
+			totalW += logoW + logoGap
+		}
+		x := cx - totalW/2
+
+		if logoImg != nil {
+			blitImage(hdc, x, capY+textH/2-logoH/2, logoImg)
+			x += logoW + logoGap
+		}
+		hdc.TextOut(int(x), int(capY), e.caption)
 	}
 }
 
+// containSize вписывает изображение sw×sh в квадрат box×box с сохранением
+// пропорций.
+func containSize(sw, sh, box int32) (int32, int32) {
+	if sw < 1 || sh < 1 {
+		return box, box
+	}
+	if sw >= sh {
+		h := box * sh / sw
+		if h < 1 {
+			h = 1
+		}
+		return box, h
+	}
+	w := box * sw / sh
+	if w < 1 {
+		w = 1
+	}
+	return w, box
+}
+
+// scaleLogoOverWhite масштабирует src в dstW×dstH усреднением пикселей и
+// накладывает результат на белый фон (для полупрозрачных PNG), возвращая
+// непрозрачное изображение — готовое для blitImage.
+func scaleLogoOverWhite(src image.Image, dstW, dstH int) image.Image {
+	dst := image.NewRGBA(image.Rect(0, 0, dstW, dstH))
+	b := src.Bounds()
+	sw, sh := b.Dx(), b.Dy()
+	if sw < 1 || sh < 1 || dstW < 1 || dstH < 1 {
+		return dst
+	}
+
+	for dy := 0; dy < dstH; dy++ {
+		sy0 := b.Min.Y + dy*sh/dstH
+		sy1 := b.Min.Y + (dy+1)*sh/dstH
+		if sy1 <= sy0 {
+			sy1 = sy0 + 1
+		}
+		for dx := 0; dx < dstW; dx++ {
+			sx0 := b.Min.X + dx*sw/dstW
+			sx1 := b.Min.X + (dx+1)*sw/dstW
+			if sx1 <= sx0 {
+				sx1 = sx0 + 1
+			}
+			var rs, gs, bs, as, cnt uint64
+			for sy := sy0; sy < sy1; sy++ {
+				for sx := sx0; sx < sx1; sx++ {
+					r, g, bl, a := src.At(sx, sy).RGBA() // премультиплиц., 16 бит
+					rs += uint64(r >> 8)
+					gs += uint64(g >> 8)
+					bs += uint64(bl >> 8)
+					as += uint64(a >> 8)
+					cnt++
+				}
+			}
+			if cnt == 0 {
+				cnt = 1
+			}
+			// Наложение на белый: out = premult + 255*(1 - alpha).
+			whiteAdd := 255 - as/cnt
+			dst.SetRGBA(dx, dy, color.RGBA{
+				R: clamp8(rs/cnt + whiteAdd),
+				G: clamp8(gs/cnt + whiteAdd),
+				B: clamp8(bs/cnt + whiteAdd),
+				A: 255,
+			})
+		}
+	}
+	return dst
+}
+
+func clamp8(v uint64) uint8 {
+	if v > 255 {
+		return 255
+	}
+	return uint8(v)
+}
+
 // blitImage выводит изображение img на hdc в позицию (x, y) без масштабирования
-// (1:1) через StretchDIBits — не создавая промежуточных HBITMAP.
+// (1:1). Изображение переносится в DIB-секцию (imageToBitmap) и копируется через
+// memory-DC + BitBlt — этот путь надёжно работает и для крупных изображений
+// (в отличие от StretchDIBits, который на больших блитах не срабатывал).
 func blitImage(hdc win.HDC, x, y int32, img image.Image) {
 	b := img.Bounds()
 	w := int32(b.Dx())
@@ -180,35 +304,31 @@ func blitImage(hdc win.HDC, x, y int32, img image.Image) {
 		return
 	}
 
-	stride := int(w) * 4
-	bits := make([]byte, stride*int(h))
-	// Bottom-up DIB: первая строка буфера — нижняя строка изображения.
-	for iy := 0; iy < int(h); iy++ {
-		dstRow := (int(h) - 1 - iy) * stride
-		srcY := b.Min.Y + iy
-		for ix := 0; ix < int(w); ix++ {
-			r, g, bl, a := img.At(b.Min.X+ix, srcY).RGBA()
-			o := dstRow + ix*4
-			bits[o] = byte(bl >> 8)
-			bits[o+1] = byte(g >> 8)
-			bits[o+2] = byte(r >> 8)
-			bits[o+3] = byte(a >> 8)
-		}
+	hBmp, err := imageToBitmap(img)
+	if err != nil {
+		log.Printf("Не удалось подготовить изображение: %v", err)
+		return
 	}
+	defer hBmp.DeleteObject()
 
-	var bi win.BITMAPINFO
-	bi.BmiHeader.SetBiSize()
-	bi.BmiHeader.Width = w
-	bi.BmiHeader.Height = h // положительная высота — bottom-up
-	bi.BmiHeader.Planes = 1
-	bi.BmiHeader.BitCount = co.BITCOUNT_32
-	bi.BmiHeader.Compression = co.BI_RGB
+	memDC, err := hdc.CreateCompatibleDC()
+	if err != nil {
+		log.Printf("Не удалось создать memory DC: %v", err)
+		return
+	}
+	defer memDC.DeleteDC()
 
-	if _, err := hdc.StretchDIBits(
+	prev, err := memDC.SelectObjectBmp(hBmp)
+	if err != nil {
+		log.Printf("Не удалось выбрать bitmap в memory DC: %v", err)
+		return
+	}
+	defer memDC.SelectObjectBmp(prev)
+
+	if err := hdc.BitBlt(
 		win.POINT{X: x, Y: y}, win.SIZE{Cx: w, Cy: h},
-		win.POINT{X: 0, Y: 0}, win.SIZE{Cx: w, Cy: h},
-		&bits[0], &bi, co.DIB_COLORS_RGB, co.ROP_SRCCOPY,
+		memDC, win.POINT{X: 0, Y: 0}, co.ROP_SRCCOPY,
 	); err != nil {
-		log.Printf("Не удалось нарисовать QR: %v", err)
+		log.Printf("Не удалось нарисовать изображение: %v", err)
 	}
 }
