@@ -123,7 +123,14 @@ func newWindowState() *windowState {
 func main() {
 	runtime.LockOSThread() // Windows GUI must run on one OS thread.
 
-	log.SetOutput(io.Discard) // GUI-приложение: ничего не выводим в консоль.
+	initLogging() // лог пишем в текстовый файл рядом с бинарником (kioskin.log).
+
+	// Приложение рассчитано на киоск с двумя мониторами. Если подключён только
+	// один — не запускаемся и пишем причину в лог.
+	if n := monitorCount(); n < 2 {
+		log.Printf("Запуск отменён: приложению нужно два монитора, найден %d", n)
+		return
+	}
 
 	cfg := loadConfig(configFilePath)
 	if err := initAppLogo(cfg); err != nil {
@@ -602,6 +609,15 @@ func applyWindowPlacement(wnd *ui.Main, placement windowPlacement) {
 	}
 
 	hwnd.SetForegroundWindow()
+}
+
+// monitorCount возвращает число подключённых мониторов. При ошибке перечисления
+// использует системный счётчик SM_CMONITORS.
+func monitorCount() int {
+	if rects, err := listMonitorRects(); err == nil && len(rects) > 0 {
+		return len(rects)
+	}
+	return int(win.GetSystemMetrics(co.SM_CMONITORS))
 }
 
 func listMonitorRects() ([]win.RECT, error) {
