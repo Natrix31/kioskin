@@ -204,8 +204,11 @@ func applyUpdate(app *appRuntime, data []byte) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	_ = app.server.Shutdown(ctx)
-	app.state.closeActiveWindow()
 
+	// Запускаем новую копию ДО завершения текущей и НЕ закрываем окно вручную:
+	// closeActiveWindow заставил бы главный цикл выйти из main(), и процесс мог
+	// бы завершиться раньше, чем сработает cmd.Start() (гонка → новая копия не
+	// стартует). Текущий процесс снимет os.Exit ниже — вместе с окном.
 	cmd := exec.Command(exe)
 	if wd, err := os.Getwd(); err == nil {
 		cmd.Dir = wd
