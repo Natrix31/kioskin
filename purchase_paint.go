@@ -1,6 +1,7 @@
 package main
 
 import (
+	"strconv"
 	"strings"
 	"syscall"
 	"unsafe"
@@ -79,16 +80,23 @@ func drawPurchaseList(hdc win.HDC, rc win.RECT, items []purchaseItem) {
 		avg = int32(tm.AveCharWidth)
 	}
 
-	// Геометрия колонок: числовые фиксированы по средней ширине символа,
+	// Геометрия колонок: № и числовые фиксированы по средней ширине символа,
 	// наименование занимает остаток.
+	numDigits := len(strconv.Itoa(len(items)))
+	if numDigits < 2 {
+		numDigits = 2
+	}
+	numW := avg * int32(numDigits+2)
 	qtyW := avg * 8
 	priceW := avg * 12
 	sumW := avg * 13
-	nameW := (rc.Right - rc.Left) - qtyW - priceW - sumW
+	nameW := (rc.Right - rc.Left) - numW - qtyW - priceW - sumW
 	if nameW < avg*6 {
 		nameW = avg * 6
 	}
-	nameX := rc.Left
+	numX := rc.Left
+	numRight := numX + numW
+	nameX := numRight
 	qtyRight := nameX + nameW + qtyW
 	priceRight := qtyRight + priceW
 	sumRight := priceRight + sumW
@@ -104,6 +112,7 @@ func drawPurchaseList(hdc win.HDC, rc win.RECT, items []purchaseItem) {
 	headerH := lineH + 2*cellPadY
 	fillRow(hdc, rc.Left, y, rc.Right, y+headerH, brHeader)
 	hdc.SetTextColor(clrHeadTx)
+	drawRight(hdc, "№", numRight, y+cellPadY)
 	hdc.TextOut(int(nameX+cellPadX), int(y+cellPadY), "НАИМЕНОВАНИЕ")
 	drawRight(hdc, "КОЛ-ВО", qtyRight, y+cellPadY)
 	drawRight(hdc, "ЦЕНА", priceRight, y+cellPadY)
@@ -126,6 +135,7 @@ func drawPurchaseList(hdc win.HDC, rc win.RECT, items []purchaseItem) {
 		fillRow(hdc, rc.Left, y, rc.Right, y+rowH, br)
 
 		hdc.SetTextColor(clrText)
+		drawRight(hdc, strconv.Itoa(i+1), numRight, y+cellPadY)
 		ty := y + cellPadY
 		for _, ln := range lines {
 			hdc.TextOut(int(nameX+cellPadX), int(ty), ln)
@@ -142,7 +152,7 @@ func drawPurchaseList(hdc win.HDC, rc win.RECT, items []purchaseItem) {
 	if totalH := lineH + 2*cellPadY; y+totalH <= rc.Bottom {
 		fillRow(hdc, rc.Left, y, rc.Right, y+totalH, brTotal)
 		hdc.SetTextColor(clrTotTx)
-		hdc.TextOut(int(nameX+cellPadX), int(y+cellPadY), "ИТОГО")
+		hdc.TextOut(int(numX+cellPadX), int(y+cellPadY), "ИТОГО")
 		drawRight(hdc, formatMoney(total), sumRight, y+cellPadY)
 	}
 }

@@ -27,13 +27,13 @@ const (
 	alphaOpaque       = 255
 	labelMarginDip    = 12
 	configFilePath    = "config.json"
-	listFontBasePx    = 28 // базовая высота шрифта списка (при 1920x1080), px
+	listFontBasePx    = 20 // базовая высота шрифта списка (при 1920x1080), px
 
 	// Автомасштаб UI считается по диагонали дисплея относительно 1920x1080.
 	refDiag       = 2202.9 // sqrt(1920^2 + 1080^2)
 	uiScaleMin    = 0.55   // нижний предел масштаба (напр. 768x1366)
 	uiScaleMax    = 1.6    // верхний предел (напр. 3440x1440)
-	listFontMinPx = 16
+	listFontMinPx = 12
 	listFontMaxPx = 44
 
 	// appIconResID — числовой ID иконки (RT_GROUP_ICON) в rsrc.syso.
