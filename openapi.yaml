@@ -183,6 +183,28 @@ paths:
         "405":
           $ref: "#/components/responses/MethodNotAllowed"
 
+  /wifi:
+    get:
+      tags: [window]
+      summary: Показать QR-код подключения к Wi-Fi на весь экран
+      description: |
+        Разворачивает окно на весь выбранный монитор, делает его полностью
+        непрозрачным (alpha = 255) и показывает по центру вшитую картинку с
+        QR-кодом подключения к Wi-Fi. Список покупок, текст и логотип скрываются.
+
+        Возврат к обычному режиму — через `POST /update` или `GET /clear`.
+      operationId: showWifi
+      responses:
+        "200":
+          description: Окно развёрнуто на весь экран, показан QR-код Wi-Fi
+          content:
+            text/plain:
+              schema:
+                type: string
+              example: "Окно развёрнуто на весь экран, показан QR-код Wi-Fi"
+        "405":
+          $ref: "#/components/responses/MethodNotAllowed"
+
   /shutdown:
     get:
       tags: [system]

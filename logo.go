@@ -212,7 +212,7 @@ func calcLogoSize(clientWidth, clientHeight, margin int32) (int32, int32) {
 	return logoWidth, logoHeight
 }
 
-func resizeWindowContent(wnd *ui.Main, label, logo *ui.Static, showLogo, showSocials bool) {
+func resizeWindowContent(wnd *ui.Main, label, logo *ui.Static, showLogo, showSocials, showWifi bool) {
 	clientRect, err := wnd.Hwnd().GetClientRect()
 	if err != nil {
 		log.Printf("Не удалось получить размер клиентской области: %v", err)
@@ -226,9 +226,10 @@ func resizeWindowContent(wnd *ui.Main, label, logo *ui.Static, showLogo, showSoc
 	// Масштаб UI под разрешение текущего монитора (окно полноэкранное).
 	updateUIScale(clientWidth, clientHeight)
 
-	if showSocials {
-		// Режим /socials: логотип скрыт, owner-draw область растянута на весь
-		// экран — в ней рисуются QR-коды (см. drawSocialsQRCodes).
+	if showSocials || showWifi {
+		// Полноэкранные режимы /socials и /wifi: логотип скрыт, owner-draw
+		// область растянута на весь экран (в ней рисуются QR-коды или картинка
+		// Wi-Fi — см. drawSocialsQRCodes / drawWifiImage).
 		setControlVisible(logo, false)
 		resizeControl(wnd, label, 0, 0, clientWidth, clientHeight)
 		setControlVisible(label, true)
