@@ -113,6 +113,7 @@ func drawPurchaseList(hdc win.HDC, rc win.RECT, items []purchaseItem) {
 	// Позиции.
 	for i, it := range items {
 		lines := wrapText(hdc, it.Name, nameW-2*cellPadX)
+		lines = clampLines(hdc, lines, 2, nameW-2*cellPadX) // не больше 2 строк
 		rowH := int32(len(lines))*lineH + 2*cellPadY
 		if y+rowH > rc.Bottom {
 			break // не влезает — прекращаем (окно ограничено по высоте)
@@ -217,5 +218,24 @@ func wrapText(hdc win.HDC, text string, maxW int32) []string {
 	if len(lines) == 0 {
 		return []string{""}
 	}
+	return lines
+}
+
+// clampLines ограничивает число строк maxLines. Если строк больше — лишние
+// отбрасываются, а к последней оставленной добавляется «…» (с ужиманием по
+// ширине maxW, чтобы многоточие поместилось).
+func clampLines(hdc win.HDC, lines []string, maxLines int, maxW int32) []string {
+	if len(lines) <= maxLines {
+		return lines
+	}
+	lines = lines[:maxLines]
+
+	const ell = "…"
+	last := lines[maxLines-1]
+	for last != "" && textWidth(hdc, last+ell) > maxW {
+		r := []rune(last)
+		last = strings.TrimRight(string(r[:len(r)-1]), " ")
+	}
+	lines[maxLines-1] = last + ell
 	return lines
 }

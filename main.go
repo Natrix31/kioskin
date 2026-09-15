@@ -10,6 +10,7 @@ import (
 	"github.com/rodrigocfd/windigo/win"
 	"io"
 	"log"
+	"math"
 	"net/http"
 	"os"
 	"runtime"
@@ -26,7 +27,14 @@ const (
 	alphaOpaque       = 255
 	labelMarginDip    = 12
 	configFilePath    = "config.json"
-	listFontHeightPx  = 30 // высота моноширинного шрифта списка покупок, px
+	listFontBasePx    = 28 // базовая высота шрифта списка (при 1920x1080), px
+
+	// Автомасштаб UI считается по диагонали дисплея относительно 1920x1080.
+	refDiag       = 2202.9 // sqrt(1920^2 + 1080^2)
+	uiScaleMin    = 0.55   // нижний предел масштаба (напр. 768x1366)
+	uiScaleMax    = 1.6    // верхний предел (напр. 3440x1440)
+	listFontMinPx = 16
+	listFontMaxPx = 44
 
 	// appIconResID — числовой ID иконки (RT_GROUP_ICON) в rsrc.syso.
 	// rsrc присваивает ID по порядку: манифест = 1, группа иконок = 2.
@@ -41,17 +49,67 @@ var (
 // Special HWND value for SetWindowPos Z-order, not exported by windigo.
 var hwndTopmost = win.HWND(^uintptr(0)) // HWND_TOPMOST (-1)
 
-// listFont — моноширинный шрифт для списка покупок (создаётся один раз).
-var listFont win.HFONT
+// uiScale — множитель размеров UI (шрифт, QR) в зависимости от разрешения
+// дисплея. 1.0 ≈ при 1920x1080; пересчитывается в updateUIScale при размещении
+// окна. Клампится в диапазоне [uiScaleMin, uiScaleMax].
+var uiScale = 1.0
 
-// ensureListFont лениво создаёт моноширинный шрифт и кэширует его на время
-// жизни процесса (освобождается ОС при завершении).
+// updateUIScale пересчитывает масштаб по диагонали клиентской области (= разрешение
+// монитора, т.к. окно полноэкранное) относительно эталона 1920x1080.
+func updateUIScale(clientW, clientH int32) {
+	if clientW <= 0 || clientH <= 0 {
+		return
+	}
+	s := math.Hypot(float64(clientW), float64(clientH)) / refDiag
+	if s < uiScaleMin {
+		s = uiScaleMin
+	}
+	if s > uiScaleMax {
+		s = uiScaleMax
+	}
+	uiScale = s
+}
+
+// scalePx масштабирует базовый размер (в px при 1920x1080) под текущий uiScale.
+func scalePx(base int32) int32 {
+	return int32(math.Round(float64(base) * uiScale))
+}
+
+// curListFontPx — текущая высота шрифта списка с учётом масштаба и пределов.
+func curListFontPx() int32 {
+	px := scalePx(listFontBasePx)
+	if px < listFontMinPx {
+		px = listFontMinPx
+	}
+	if px > listFontMaxPx {
+		px = listFontMaxPx
+	}
+	return px
+}
+
+// listFont — моноширинный шрифт списка; кэшируется и пересоздаётся при смене
+// размера (например, если окно переехало на монитор с другим разрешением).
+var (
+	listFont   win.HFONT
+	listFontPx int32
+)
+
+// ensureListFont возвращает моноширинный шрифт нужной под разрешение высоты,
+// создавая новый при изменении размера. Старый шрифт освобождается.
 func ensureListFont() win.HFONT {
-	if listFont != 0 {
+	px := curListFontPx()
+	if listFont != 0 && listFontPx == px {
 		return listFont
 	}
+	if listFont != 0 {
+		if err := listFont.DeleteObject(); err != nil {
+			log.Printf("Не удалось удалить прежний шрифт списка: %v", err)
+		}
+		listFont = 0
+	}
+
 	lf := win.LOGFONT{
-		Height:  int32(-listFontHeightPx),
+		Height:  -px,
 		Weight:  co.FW_NORMAL,
 		CharSet: co.CHARSET_DEFAULT,
 		Quality: co.QUALITY_CLEARTYPE,
@@ -66,6 +124,7 @@ func ensureListFont() win.HFONT {
 		return 0
 	}
 	listFont = f
+	listFontPx = px
 	return f
 }
 

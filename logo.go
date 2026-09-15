@@ -223,6 +223,9 @@ func resizeWindowContent(wnd *ui.Main, label, logo *ui.Static, showLogo, showSoc
 	clientWidth := clientRect.Right - clientRect.Left
 	clientHeight := clientRect.Bottom - clientRect.Top
 
+	// Масштаб UI под разрешение текущего монитора (окно полноэкранное).
+	updateUIScale(clientWidth, clientHeight)
+
 	if showSocials {
 		// Режим /socials: логотип скрыт, owner-draw область растянута на весь
 		// экран — в ней рисуются QR-коды (см. drawSocialsQRCodes).

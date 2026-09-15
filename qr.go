@@ -58,9 +58,9 @@ func initAppQRCodes(cfg appConfig) {
 const (
 	qrPad        = 18  // отступ вокруг QR внутри ячейки
 	qrCaptionH   = 40  // высота строки подписи (≈ высота шрифта списка + запас)
-	qrMaxSize    = 420 // максимальный размер QR в полосе под списком
+	qrMaxSize    = 260 // максимальный размер QR в полосе под списком
 	qrMinSize    = 64  // минимальный размер QR
-	qrSocialsMax = 900 // максимальный размер QR в полноэкранном режиме /socials
+	qrSocialsMax = 260 // максимальный размер QR в /socials (коды идут столбиком)
 )
 
 // qrMetrics вычисляет высоту полосы QR и размер стороны одного QR-кода для
@@ -74,8 +74,8 @@ func qrMetrics(w, h, n int32) (band, qr int32) {
 	if maxByH := h*42/100 - qrCaptionH - 3*qrPad; qr > maxByH {
 		qr = maxByH
 	}
-	if qr > qrMaxSize {
-		qr = qrMaxSize
+	if qrCap := scalePx(qrMaxSize); qr > qrCap {
+		qr = qrCap
 	}
 	if qr < qrMinSize {
 		qr = qrMinSize
@@ -120,8 +120,8 @@ func drawQRBand(hdc win.HDC, rc win.RECT, entries []qrEntry) {
 	drawQRRow(hdc, rc.Left, rc.Right, top+qrPad, qr, entries)
 }
 
-// drawSocialsQRCodes рисует QR-коды крупно по центру всей области rc (режим
-// /socials): без списка покупок, только коды с подписями.
+// drawSocialsQRCodes рисует QR-коды по центру экрана столбиком (один под
+// другим) — режим /socials, без списка покупок.
 func drawSocialsQRCodes(hdc win.HDC, rc win.RECT) {
 	ensureBrushes()
 
@@ -137,82 +137,97 @@ func drawSocialsQRCodes(hdc win.HDC, rc win.RECT) {
 	w := rc.Right - rc.Left
 	h := rc.Bottom - rc.Top
 
-	qr := w/n - 2*qrPad
-	if maxByH := h - qrCaptionH - 4*qrPad; qr > maxByH {
-		qr = maxByH
+	// Экран делится по вертикали на n равных полос (для двух кодов — пополам);
+	// в каждой полосе QR-блок центрируется.
+	segH := h / n
+
+	qr := scalePx(qrSocialsMax)
+	if maxByW := w - 2*qrPad; qr > maxByW {
+		qr = maxByW
 	}
-	if qr > qrSocialsMax {
-		qr = qrSocialsMax
+	if maxByH := segH - qrCaptionH - qrPad; qr > maxByH {
+		qr = maxByH
 	}
 	if qr < qrMinSize {
 		qr = qrMinSize
 	}
 
-	// Вертикально центрируем блок «QR + подпись».
-	blockH := qr + qrPad/2 + qrCaptionH
-	top := rc.Top + (h-blockH)/2
-	if top < rc.Top {
-		top = rc.Top
+	textH := setupQRText(hdc)
+	blockH := qr + qrPad/2 + textH // высота блока «QR + подпись»
+	cx := rc.Left + w/2
+	for i, e := range entries {
+		segTop := rc.Top + segH*int32(i)
+		top := segTop + (segH-blockH)/2
+		if top < segTop {
+			top = segTop
+		}
+		drawQREntry(hdc, cx, top, qr, textH, e)
 	}
-	drawQRRow(hdc, rc.Left, rc.Right, top, qr, entries)
 }
 
 // drawQRRow рисует entries в один ряд: каждый QR стороной qr по центру своей
-// ячейки, верхний край на y = top, под ним — подпись. Шрифт и цвет текста
-// настраиваются здесь же.
+// ячейки, верхний край на y = top, под ним — подпись.
 func drawQRRow(hdc win.HDC, left, right, top, qr int32, entries []qrEntry) {
 	n := int32(len(entries))
 	if n == 0 {
 		return
 	}
+	textH := setupQRText(hdc)
+	cellW := (right - left) / n
+	for i, e := range entries {
+		cx := left + cellW*int32(i) + cellW/2
+		drawQREntry(hdc, cx, top, qr, textH, e)
+	}
+}
 
+// setupQRText выбирает шрифт подписей, прозрачный фон и цвет текста; возвращает
+// высоту строки текста.
+func setupQRText(hdc win.HDC) int32 {
 	if f := ensureListFont(); f != 0 {
 		hdc.SelectObjectFont(f)
 	}
 	hdc.SetBkMode(co.BKMODE_TRANSPARENT)
 	hdc.SetTextColor(clrText)
-
 	textH := int32(28)
 	if tm, err := hdc.GetTextMetrics(); err == nil {
 		textH = int32(tm.Height)
 	}
+	return textH
+}
 
-	cellW := (right - left) / n
-	for i, e := range entries {
-		cx := left + cellW*int32(i) + cellW/2
+// drawQREntry рисует один QR стороной qr (верхний край на y, центр по
+// горизонтали в cx) и под ним подпись «[логотип] Название». Шрифт/цвет должны
+// быть уже настроены через setupQRText.
+func drawQREntry(hdc win.HDC, cx, top, qr, textH int32, e qrEntry) {
+	img := e.code.Image(int(qr))
+	aw := int32(img.Bounds().Dx())
+	ah := int32(img.Bounds().Dy())
+	blitImage(hdc, cx-aw/2, top+(qr-ah)/2, img)
 
-		img := e.code.Image(int(qr))
-		aw := int32(img.Bounds().Dx())
-		ah := int32(img.Bounds().Dy())
-		blitImage(hdc, cx-aw/2, top+(qr-ah)/2, img)
+	capY := top + qr + qrPad/2
+	tw := textWidth(hdc, e.caption)
 
-		// Строка подписи: [логотип] Название — по центру под QR.
-		capY := top + qr + qrPad/2
-		tw := textWidth(hdc, e.caption)
-
-		const logoGap = 10
-		var (
-			logoImg image.Image
-			logoW   int32
-			logoH   int32
-		)
-		if e.logo != nil {
-			logoW, logoH = containSize(e.logo.width, e.logo.height, textH*3/2)
-			logoImg = scaleLogoOverWhite(e.logo.img, int(logoW), int(logoH))
-		}
-
-		totalW := tw
-		if logoImg != nil {
-			totalW += logoW + logoGap
-		}
-		x := cx - totalW/2
-
-		if logoImg != nil {
-			blitImage(hdc, x, capY+textH/2-logoH/2, logoImg)
-			x += logoW + logoGap
-		}
-		hdc.TextOut(int(x), int(capY), e.caption)
+	const logoGap = 10
+	var (
+		logoImg image.Image
+		logoW   int32
+		logoH   int32
+	)
+	if e.logo != nil {
+		logoW, logoH = containSize(e.logo.width, e.logo.height, textH*3/2)
+		logoImg = scaleLogoOverWhite(e.logo.img, int(logoW), int(logoH))
 	}
+
+	total := tw
+	if logoImg != nil {
+		total += logoW + logoGap
+	}
+	x := cx - total/2
+	if logoImg != nil {
+		blitImage(hdc, x, capY+textH/2-logoH/2, logoImg)
+		x += logoW + logoGap
+	}
+	hdc.TextOut(int(x), int(capY), e.caption)
 }
 
 // containSize вписывает изображение sw×sh в квадрат box×box с сохранением
