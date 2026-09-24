@@ -171,6 +171,9 @@ paths:
 
         QR-коды берутся из `config.json` — если ссылки не заданы, экран останется
         пустым. Возврат к обычному режиму — через `POST /update` или `GET /clear`.
+
+        Авто-clear: если за `socials_clear_seconds` (по умолчанию 60 c) не пришло
+        ни `/update`, ни `/clear`, ни `/wifi` — окно само вернётся в исходный режим.
       operationId: showSocials
       responses:
         "200":
@@ -202,6 +205,31 @@ paths:
               schema:
                 type: string
               example: "Окно развёрнуто на весь экран, показан QR-код Wi-Fi"
+        "405":
+          $ref: "#/components/responses/MethodNotAllowed"
+
+  /reload:
+    get:
+      tags: [config]
+      summary: Перечитать конфиг и перегенерировать QR-коды
+      description: |
+        Перечитывает `config.json` (ведущий UTF-8 BOM допускается) и заново
+        генерирует QR-коды ботов из актуальных `telegram_url` / `max_url`. Окно
+        сразу не перерисовывается — новые QR применятся при следующем GET /socials
+        (и в полосе под списком при следующем /update). Для внешнего приложения,
+        которое меняет ссылки в конфиге и применяет их без перезапуска. Монитор,
+        логотип и прочие поля не перечитываются — только QR-коды.
+      operationId: reloadConfig
+      responses:
+        "200":
+          description: Конфиг перечитан, QR-коды перегенерированы
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { type: string, example: ok }
+                  qr: { type: integer, example: 2 }
         "405":
           $ref: "#/components/responses/MethodNotAllowed"
 

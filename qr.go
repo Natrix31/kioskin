@@ -5,6 +5,7 @@ import (
 	"image"
 	"image/color"
 	"log"
+	"sync"
 
 	"github.com/rodrigocfd/windigo/co"
 	"github.com/rodrigocfd/windigo/win"
@@ -25,14 +26,20 @@ type qrEntry struct {
 }
 
 // appQRCodes — QR-коды, показываемые в нижней части основного окна. Заполняется
-// один раз при старте из config.json (ссылки на ботов). Пустой срез — QR не
-// показываются, список покупок занимает всю высоту.
-var appQRCodes []qrEntry
+// из config.json (ссылки на ботов) при старте и заново по GET /reload. Пустой
+// срез — QR не показываются, список покупок занимает всю высоту.
+//
+// Доступ через qrMu: пишется в initAppQRCodes (старт/reload), читается UI-потоком
+// при отрисовке (activeQRCodes).
+var (
+	qrMu       sync.RWMutex
+	appQRCodes []qrEntry
+)
 
-// initAppQRCodes готовит QR-коды из ссылок в конфиге. Пустая ссылка — QR
-// пропускается. Ошибка кодирования не фатальна: просто без этого QR.
+// initAppQRCodes перегенерирует QR-коды из ссылок в конфиге и атомарно заменяет
+// текущий набор. Пустая ссылка — QR пропускается; ошибка кодирования не фатальна.
 func initAppQRCodes(cfg appConfig) {
-	appQRCodes = appQRCodes[:0]
+	var entries []qrEntry
 	add := func(url, caption string, logoPNG []byte) {
 		if url == "" {
 			return
@@ -48,10 +55,22 @@ func initAppQRCodes(cfg appConfig) {
 		} else {
 			entry.logo = logo
 		}
-		appQRCodes = append(appQRCodes, entry)
+		entries = append(entries, entry)
 	}
 	add(cfg.TelegramURL, "Telegram", telegramLogoPNG)
 	add(cfg.MaxURL, "MAX", maxLogoPNG)
+
+	qrMu.Lock()
+	appQRCodes = entries
+	qrMu.Unlock()
+}
+
+// activeQRCodes возвращает текущий набор QR-кодов. Срез и его элементы не
+// мутируются (заменяется целиком), поэтому снимок можно использовать без лока.
+func activeQRCodes() []qrEntry {
+	qrMu.RLock()
+	defer qrMu.RUnlock()
+	return appQRCodes
 }
 
 // Геометрия полосы QR (px при 96 DPI).
@@ -88,12 +107,13 @@ func qrMetrics(w, h, n int32) (band, qr int32) {
 // если заданы ссылки и showQR=true (режим списка/пречека), полосу QR-кодов внизу.
 // В стартовом полупрозрачном состоянии showQR=false — QR не показываются.
 func drawWindowContent(hdc win.HDC, rc win.RECT, items []purchaseItem, showQR bool) {
-	if !showQR || len(appQRCodes) == 0 {
+	entries := activeQRCodes()
+	if !showQR || len(entries) == 0 {
 		drawPurchaseList(hdc, rc, items)
 		return
 	}
 
-	band, _ := qrMetrics(rc.Right-rc.Left, rc.Bottom-rc.Top, int32(len(appQRCodes)))
+	band, _ := qrMetrics(rc.Right-rc.Left, rc.Bottom-rc.Top, int32(len(entries)))
 
 	listRc := rc
 	listRc.Bottom = rc.Bottom - band
@@ -101,7 +121,7 @@ func drawWindowContent(hdc win.HDC, rc win.RECT, items []purchaseItem, showQR bo
 		listRc.Bottom = listRc.Top
 	}
 	drawPurchaseList(hdc, listRc, items)
-	drawQRBand(hdc, rc, appQRCodes)
+	drawQRBand(hdc, rc, entries)
 }
 
 // drawQRBand рисует полосу QR-кодов внизу области rc: каждый код по центру своей
@@ -128,7 +148,7 @@ func drawSocialsQRCodes(hdc win.HDC, rc win.RECT) {
 	// Непрозрачный фон на весь экран.
 	fillRow(hdc, rc.Left, rc.Top, rc.Right, rc.Bottom, brBg)
 
-	entries := appQRCodes
+	entries := activeQRCodes()
 	n := int32(len(entries))
 	if n == 0 {
 		return

@@ -29,6 +29,10 @@ const (
 	configFilePath    = "config.json"
 	listFontBasePx    = 20 // базовая высота шрифта списка (при 1920x1080), px
 
+	// defaultSocialsClearSecs — таймаут авто-возврата из режима /socials в
+	// исходный, если socials_clear_seconds в конфиге не задан (0).
+	defaultSocialsClearSecs = 60
+
 	// Автомасштаб UI считается по диагонали дисплея относительно 1920x1080.
 	refDiag       = 2202.9 // sqrt(1920^2 + 1080^2)
 	uiScaleMin    = 0.55   // нижний предел масштаба (напр. 768x1366)
@@ -141,6 +145,10 @@ type windowState struct {
 	logo        *ui.Static
 	normal      windowPlacement
 	full        windowPlacement
+
+	autoClearSecs  int // таймаут авто-clear после /socials; 0 — отключено
+	timerMu        sync.Mutex
+	autoClearTimer *time.Timer
 }
 
 type appConfig struct {
@@ -148,6 +156,10 @@ type appConfig struct {
 	LogoPath     string `json:"logo_path"`
 	TelegramURL  string `json:"telegram_url"`
 	MaxURL       string `json:"max_url"`
+	// SocialsClearSeconds — через сколько секунд режим /socials сам вернётся в
+	// исходный (авто-clear). 0 — по умолчанию (defaultSocialsClearSecs),
+	// отрицательное — отключено.
+	SocialsClearSeconds int `json:"socials_clear_seconds"`
 }
 
 type windowPlacement struct {
@@ -199,6 +211,7 @@ func main() {
 	initAppQRCodes(cfg)
 	initAppWifi()
 	state := newWindowState()
+	state.autoClearSecs = resolveSocialsClearSecs(cfg.SocialsClearSeconds)
 	mux := http.NewServeMux()
 	server := &http.Server{
 		Addr:    ":8282",
@@ -212,6 +225,7 @@ func main() {
 	mux.HandleFunc("/clear", handleClearRequest(state))
 	mux.HandleFunc("/socials", handleSocialsRequest(state))
 	mux.HandleFunc("/wifi", handleWifiRequest(state))
+	mux.HandleFunc("/reload", handleReloadRequest())
 	mux.HandleFunc("/health", handleHealthcheck())
 	mux.HandleFunc("/monitors", handleMonitors())
 	mux.HandleFunc("/shutdown", handleShutdown(runtimeState))
@@ -335,6 +349,26 @@ func handleWifiRequest(state *windowState) http.HandlerFunc {
 
 		w.WriteHeader(http.StatusOK)
 		fmt.Fprintln(w, "Окно развёрнуто на весь экран, показан QR-код Wi-Fi")
+	}
+}
+
+// handleReloadRequest перечитывает config.json и заново генерирует QR-коды из
+// новых ссылок (telegram_url/max_url). Окно НЕ перерисовывается сразу —
+// обновлённые QR применятся при следующем GET /socials (и в полосе под списком
+// при следующем /update). Вызывается внешним приложением после перезаписи ссылок.
+func handleReloadRequest() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			http.Error(w, "Метод не поддерживается", http.StatusMethodNotAllowed)
+			return
+		}
+
+		cfg := loadConfig(configFilePath)
+		initAppQRCodes(cfg)
+
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprintf(w, "{\"status\":\"ok\",\"qr\":%d}\n", len(activeQRCodes()))
 	}
 }
 
@@ -473,6 +507,7 @@ func (s *windowState) unbindWindow(wnd *ui.Main) {
 // setPurchaseItems заменяет список покупок целиком и перерисовывает окно.
 // Возвращает количество позиций в списке.
 func (s *windowState) setPurchaseItems(items []purchaseItem) int {
+	s.cancelAutoClear()
 	s.mu.Lock()
 	s.items = items
 	s.showLogo = true
@@ -504,6 +539,7 @@ func (s *windowState) setPurchaseItems(items []purchaseItem) int {
 }
 
 func (s *windowState) update(text string, alpha byte, showLogo bool) {
+	s.cancelAutoClear()
 	s.mu.Lock()
 	s.text = text
 	s.alpha = alpha
@@ -547,6 +583,9 @@ func (s *windowState) enterSocialsMode() {
 	full := s.full
 	s.mu.Unlock()
 
+	// Взводим таймер авто-возврата из /socials.
+	s.armAutoClear()
+
 	if wnd == nil || label == nil {
 		return
 	}
@@ -566,6 +605,7 @@ func (s *windowState) enterSocialsMode() {
 // enterWifiMode переводит окно в полноэкранный режим и показывает по центру
 // картинку с QR-кодом подключения к Wi-Fi (без списка покупок).
 func (s *windowState) enterWifiMode() {
+	s.cancelAutoClear()
 	s.mu.Lock()
 	s.showWifi = true
 	s.showSocials = false
@@ -591,6 +631,48 @@ func (s *windowState) enterWifiMode() {
 			log.Printf("Не удалось сделать окно непрозрачным: %v", err)
 		}
 	})
+}
+
+// resolveSocialsClearSecs приводит значение из конфига к эффективному таймауту
+// авто-clear: <0 — отключено (0), 0 — значение по умолчанию, иначе — как задано.
+func resolveSocialsClearSecs(v int) int {
+	switch {
+	case v < 0:
+		return 0
+	case v == 0:
+		return defaultSocialsClearSecs
+	default:
+		return v
+	}
+}
+
+// armAutoClear (пере)взводит таймер авто-clear для режима /socials. По
+// срабатыванию возвращает окно в исходный режим, если оно всё ещё в /socials.
+func (s *windowState) armAutoClear() {
+	s.cancelAutoClear()
+	if s.autoClearSecs <= 0 {
+		return
+	}
+	s.timerMu.Lock()
+	s.autoClearTimer = time.AfterFunc(time.Duration(s.autoClearSecs)*time.Second, func() {
+		s.mu.RLock()
+		stillSocials := s.showSocials
+		s.mu.RUnlock()
+		if stillSocials {
+			s.update(initialWindowText, alphaTransparent, false)
+		}
+	})
+	s.timerMu.Unlock()
+}
+
+// cancelAutoClear останавливает таймер авто-clear, если он взведён.
+func (s *windowState) cancelAutoClear() {
+	s.timerMu.Lock()
+	if s.autoClearTimer != nil {
+		s.autoClearTimer.Stop()
+		s.autoClearTimer = nil
+	}
+	s.timerMu.Unlock()
 }
 
 func (s *windowState) closeActiveWindow() {
@@ -623,6 +705,12 @@ func loadConfig(path string) appConfig {
 	if err != nil {
 		log.Printf("Конфиг %s не прочитан (%v), используется монитор 0", path, err)
 		return cfg
+	}
+
+	// Срезаем ведущий UTF-8 BOM: некоторые редакторы/скрипты (напр. PowerShell
+	// Set-Content -Encoding UTF8) добавляют его, а encoding/json его не принимает.
+	if len(data) >= 3 && data[0] == 0xEF && data[1] == 0xBB && data[2] == 0xBF {
+		data = data[3:]
 	}
 
 	if err := json.Unmarshal(data, &cfg); err != nil {
