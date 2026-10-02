@@ -139,6 +139,7 @@ type windowState struct {
 	showLogo    bool
 	showSocials bool
 	showWifi    bool
+	showPay     bool
 	items       []purchaseItem
 	wnd         *ui.Main
 	label       *ui.Static
@@ -225,6 +226,7 @@ func main() {
 	mux.HandleFunc("/clear", handleClearRequest(state))
 	mux.HandleFunc("/socials", handleSocialsRequest(state))
 	mux.HandleFunc("/wifi", handleWifiRequest(state))
+	mux.HandleFunc("/pay", handlePayRequest(state))
 	mux.HandleFunc("/reload", handleReloadRequest())
 	mux.HandleFunc("/health", handleHealthcheck())
 	mux.HandleFunc("/monitors", handleMonitors())
@@ -248,12 +250,12 @@ func main() {
 
 // Displays the main window, blocking until it is closed.
 func ShowMainWindow(state *windowState, cfg appConfig) int {
-	_, initialAlpha, initialShowLogo, initialShowSocials, initialShowWifi := state.snapshot()
+	_, initialAlpha, initialShowLogo, initialShowSocials, initialShowWifi, initialShowPay := state.snapshot()
 	normal := initialWindowPlacement(cfg)
 	full := fullscreenWindowPlacement(cfg)
 
 	placement := normal
-	if initialShowSocials || initialShowWifi {
+	if initialShowSocials || initialShowWifi || initialShowPay {
 		placement = full
 	}
 
@@ -289,7 +291,7 @@ func ShowMainWindow(state *windowState, cfg appConfig) int {
 	wnd.On().WmCreate(func(_ ui.WmCreate) int {
 		state.bindWindow(wnd, lbl, logoStatic, normal, full)
 		applyWindowPlacement(wnd, placement)
-		resizeWindowContent(wnd, lbl, logoStatic, initialShowLogo, initialShowSocials, initialShowWifi)
+		resizeWindowContent(wnd, lbl, logoStatic, initialShowLogo, initialShowSocials || initialShowWifi || initialShowPay)
 		if err := applyWindowOpacity(wnd, initialAlpha); err != nil {
 			log.Printf("Не удалось применить прозрачность окна: %v", err)
 		}
@@ -300,7 +302,11 @@ func ShowMainWindow(state *windowState, cfg appConfig) int {
 		if dis.HwndItem != lbl.Hwnd() {
 			return
 		}
-		showLogo, showSocials, showWifi := state.contentFlags()
+		showLogo, showSocials, showWifi, showPay := state.contentFlags()
+		if showPay {
+			drawPayQR(dis.Hdc, dis.RcItem)
+			return
+		}
 		if showWifi {
 			drawWifiImage(dis.Hdc, dis.RcItem)
 			return
@@ -314,8 +320,8 @@ func ShowMainWindow(state *windowState, cfg appConfig) int {
 		drawWindowContent(dis.Hdc, dis.RcItem, state.snapshotItems(), showLogo)
 	})
 	wnd.On().WmSize(func(_ ui.WmSize) {
-		showLogo, showSocials, showWifi := state.contentFlags()
-		resizeWindowContent(wnd, lbl, logoStatic, showLogo, showSocials, showWifi)
+		showLogo, showSocials, showWifi, showPay := state.contentFlags()
+		resizeWindowContent(wnd, lbl, logoStatic, showLogo, showSocials || showWifi || showPay)
 	})
 	wnd.On().WmDestroy(func() {
 		state.unbindWindow(wnd)
@@ -369,6 +375,39 @@ func handleReloadRequest() http.HandlerFunc {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
 		fmt.Fprintf(w, "{\"status\":\"ok\",\"qr\":%d}\n", len(activeQRCodes()))
+	}
+}
+
+// handlePayRequest принимает в теле запроса платёжную ссылку в base64, декодирует
+// её, формирует QR-код и показывает его на весь экран по центру.
+func handlePayRequest(state *windowState) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "Метод не поддерживается", http.StatusMethodNotAllowed)
+			return
+		}
+
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			http.Error(w, "Ошибка чтения тела запроса", http.StatusInternalServerError)
+			return
+		}
+		defer r.Body.Close()
+
+		link, err := decodeBase64Link(body)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		if err := setPayQR(link); err != nil {
+			http.Error(w, "Не удалось сформировать QR из ссылки: "+err.Error(), http.StatusBadRequest)
+			return
+		}
+
+		state.enterPayMode()
+
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprintln(w, "Платёжный QR показан")
 	}
 }
 
@@ -466,16 +505,16 @@ func handleShutdown(app *appRuntime) http.HandlerFunc {
 	}
 }
 
-func (s *windowState) snapshot() (string, byte, bool, bool, bool) {
+func (s *windowState) snapshot() (string, byte, bool, bool, bool, bool) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	return s.text, s.alpha, s.showLogo, s.showSocials, s.showWifi
+	return s.text, s.alpha, s.showLogo, s.showSocials, s.showWifi, s.showPay
 }
 
-func (s *windowState) contentFlags() (bool, bool, bool) {
+func (s *windowState) contentFlags() (bool, bool, bool, bool) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	return s.showLogo, s.showSocials, s.showWifi
+	return s.showLogo, s.showSocials, s.showWifi, s.showPay
 }
 
 func (s *windowState) snapshotItems() []purchaseItem {
@@ -513,6 +552,7 @@ func (s *windowState) setPurchaseItems(items []purchaseItem) int {
 	s.showLogo = true
 	s.showSocials = false
 	s.showWifi = false
+	s.showPay = false
 	s.alpha = alphaOpaque
 	count := len(s.items)
 	wnd := s.wnd
@@ -527,7 +567,7 @@ func (s *windowState) setPurchaseItems(items []purchaseItem) int {
 
 	wnd.UiThread(func() {
 		applyWindowPlacement(wnd, normal)
-		resizeWindowContent(wnd, label, logo, true, false, false)
+		resizeWindowContent(wnd, label, logo, true, false)
 		if err := label.Hwnd().InvalidateRect(nil, false); err != nil {
 			log.Printf("Не удалось перерисовать список: %v", err)
 		}
@@ -546,6 +586,7 @@ func (s *windowState) update(text string, alpha byte, showLogo bool) {
 	s.showLogo = showLogo
 	s.showSocials = false
 	s.showWifi = false
+	s.showPay = false
 	s.items = nil
 	wnd := s.wnd
 	label := s.label
@@ -559,7 +600,7 @@ func (s *windowState) update(text string, alpha byte, showLogo bool) {
 
 	wnd.UiThread(func() {
 		applyWindowPlacement(wnd, normal)
-		resizeWindowContent(wnd, label, logo, showLogo, false, false)
+		resizeWindowContent(wnd, label, logo, showLogo, false)
 		if err := label.Hwnd().InvalidateRect(nil, false); err != nil {
 			log.Printf("Не удалось перерисовать окно: %v", err)
 		}
@@ -575,6 +616,7 @@ func (s *windowState) enterSocialsMode() {
 	s.mu.Lock()
 	s.showSocials = true
 	s.showWifi = false
+	s.showPay = false
 	s.showLogo = false
 	s.alpha = alphaOpaque
 	wnd := s.wnd
@@ -592,7 +634,7 @@ func (s *windowState) enterSocialsMode() {
 
 	wnd.UiThread(func() {
 		applyWindowPlacement(wnd, full)
-		resizeWindowContent(wnd, label, logo, false, true, false)
+		resizeWindowContent(wnd, label, logo, false, true)
 		if err := label.Hwnd().InvalidateRect(nil, false); err != nil {
 			log.Printf("Не удалось перерисовать QR-коды: %v", err)
 		}
@@ -609,6 +651,7 @@ func (s *windowState) enterWifiMode() {
 	s.mu.Lock()
 	s.showWifi = true
 	s.showSocials = false
+	s.showPay = false
 	s.showLogo = false
 	s.alpha = alphaOpaque
 	wnd := s.wnd
@@ -623,9 +666,42 @@ func (s *windowState) enterWifiMode() {
 
 	wnd.UiThread(func() {
 		applyWindowPlacement(wnd, full)
-		resizeWindowContent(wnd, label, logo, false, false, true)
+		resizeWindowContent(wnd, label, logo, false, true)
 		if err := label.Hwnd().InvalidateRect(nil, false); err != nil {
 			log.Printf("Не удалось перерисовать картинку Wi-Fi: %v", err)
+		}
+		if err := applyWindowOpacity(wnd, alphaOpaque); err != nil {
+			log.Printf("Не удалось сделать окно непрозрачным: %v", err)
+		}
+	})
+}
+
+// enterPayMode переводит окно в полноэкранный режим и показывает по центру
+// платёжный QR-код (без списка покупок). QR должен быть заранее установлен
+// через setPayQR.
+func (s *windowState) enterPayMode() {
+	s.cancelAutoClear()
+	s.mu.Lock()
+	s.showPay = true
+	s.showSocials = false
+	s.showWifi = false
+	s.showLogo = false
+	s.alpha = alphaOpaque
+	wnd := s.wnd
+	label := s.label
+	logo := s.logo
+	full := s.full
+	s.mu.Unlock()
+
+	if wnd == nil || label == nil {
+		return
+	}
+
+	wnd.UiThread(func() {
+		applyWindowPlacement(wnd, full)
+		resizeWindowContent(wnd, label, logo, false, true)
+		if err := label.Hwnd().InvalidateRect(nil, false); err != nil {
+			log.Printf("Не удалось перерисовать платёжный QR: %v", err)
 		}
 		if err := applyWindowOpacity(wnd, alphaOpaque); err != nil {
 			log.Printf("Не удалось сделать окно непрозрачным: %v", err)

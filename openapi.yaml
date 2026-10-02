@@ -208,6 +208,37 @@ paths:
         "405":
           $ref: "#/components/responses/MethodNotAllowed"
 
+  /pay:
+    post:
+      tags: [window]
+      summary: Показать QR платёжной ссылки (base64) на весь экран
+      description: |
+        Принимает в теле платёжную ссылку в base64 (std или url-safe, с
+        паддингом и без), декодирует её, формирует QR-код и показывает его на
+        весь экран по центру. Возврат к обычному режиму — через `POST /update`
+        или `GET /clear`.
+      operationId: showPay
+      requestBody:
+        required: true
+        content:
+          text/plain:
+            schema:
+              type: string
+              format: byte
+              example: "aHR0cHM6Ly9wYXkuZXhhbXBsZS5jb20vaW52b2ljZS8xMjM="
+      responses:
+        "200":
+          description: Платёжный QR показан
+          content:
+            text/plain:
+              schema:
+                type: string
+              example: "Платёжный QR показан"
+        "400":
+          description: Некорректный base64 / пустая или слишком длинная ссылка
+        "405":
+          $ref: "#/components/responses/MethodNotAllowed"
+
   /reload:
     get:
       tags: [config]
